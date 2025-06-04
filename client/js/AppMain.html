@@ -1,0 +1,4054 @@
+<script>
+/**
+ * CasesDash Main Application JavaScript
+ * Main entry point for client-side functionality
+ * 
+ * @author Roo
+ * @version 1.0
+ * @since 2025-05-25
+ */
+
+// Global namespace for CasesDash application
+// Only execute in client-side environment
+if (typeof window !== 'undefined') {
+  window.CasesDashApp = (function() {
+    'use strict';
+
+  // Application state
+  let appState = {
+    initialized: false,
+    currentUser: null,
+    currentView: 'dashboard',
+    sheetTypes: [],
+    dashboardData: null,
+    liveModeWindow: null,
+    currentFormGenerator: null,
+    selectedSheetType: null,
+    formMode: 'create', // 'create' or 'edit'
+    sentimentData: null,
+    sentimentConfig: null,
+    sentimentChart: null
+  };
+
+  // DOM elements cache
+  let elements = {};
+
+  /**
+   * Initialize the application
+   */
+  async function initialize() {
+    try {
+      console.log('Initializing CasesDash Application...');
+      
+      // Cache DOM elements
+      cacheElements();
+      
+      // Setup event listeners
+      setupEventListeners();
+      
+      // Initialize Material Design components
+      initializeMDC();
+      
+      // Load initial data
+      await loadInitialData();
+      
+      // Initialize CaseManagerModule
+      if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.initialize === 'function') {
+        try {
+          await window.CasesDashCaseManager.initialize();
+          console.log('CaseManagerModule initialized successfully');
+        } catch (error) {
+          console.warn('CaseManagerModule initialization failed:', error);
+        }
+      }
+      
+      // Mark as initialized
+      appState.initialized = true;
+      
+      console.log('CasesDash Application initialized successfully');
+      
+    } catch (error) {
+      console.error('Failed to initialize application:', error);
+      showError('Failed to initialize application. Please refresh the page.');
+    }
+  }
+
+  /**
+   * Cache frequently used DOM elements
+   */
+  function cacheElements() {
+    elements = {
+      loadingOverlay: document.getElementById('loading-overlay'),
+      errorSnackbar: document.getElementById('error-snackbar'),
+      toast: document.getElementById('toast'),
+      liveModeButton: document.getElementById('live-mode-button'),
+      
+      // Views
+      dashboardView: document.getElementById('dashboard-view'),
+      caseListView: document.getElementById('case-list-view'),
+      caseFormView: document.getElementById('case-form-view'),
+      searchView: document.getElementById('search-view'),
+      sentimentView: document.getElementById('sentiment-view'),
+      
+      // Dashboard elements
+      myCasesCount: document.getElementById('my-cases-count'),
+      openCasesCount: document.getElementById('open-cases-count'),
+      closedTodayCount: document.getElementById('closed-today-count'),
+      totalCasesCount: document.getElementById('total-cases-count'),
+      recentActivity: document.getElementById('recent-activity'),
+      
+      // Case list elements
+      casesTableBody: document.getElementById('cases-table-body'),
+      caseSearch: document.getElementById('case-search'),
+      
+      // Form elements
+      caseForm: document.getElementById('case-form'),
+      formTitle: document.getElementById('form-title'),
+      sheetTypeSelector: document.getElementById('sheet-type-selector'),
+      formContainer: document.getElementById('form-container'),
+      formErrorContainer: document.getElementById('form-error-container'),
+      
+      // Search elements
+      searchForm: document.getElementById('search-form'),
+      searchResults: document.getElementById('search-results'),
+      searchSheetType: document.getElementById('search-sheet-type'),
+      
+      // Sentiment elements
+      sentimentModal: document.getElementById('sentiment-modal'),
+      sentimentForm: document.getElementById('sentiment-form'),
+      sentimentYearSelect: document.getElementById('sentiment-year'),
+      sentimentMonthSelect: document.getElementById('sentiment-month'),
+      sentimentScoreSlider: document.getElementById('sentiment-score-slider'),
+      sentimentScoreDisplay: document.getElementById('sentiment-score-display'),
+      sentimentComment: document.getElementById('sentiment-comment'),
+      sentimentValidationMessages: document.getElementById('sentiment-validation-messages'),
+      
+      // Dashboard sentiment elements
+      currentSentimentScore: document.getElementById('current-sentiment-score'),
+      sentimentPeriodText: document.getElementById('sentiment-period-text'),
+      sentimentTrendIcon: document.getElementById('sentiment-trend-icon'),
+      sentimentTrendText: document.getElementById('sentiment-trend-text'),
+      sentimentChart: document.getElementById('sentiment-chart'),
+      
+      // Sentiment management view elements
+      currentMonthScore: document.getElementById('current-month-score'),
+      currentMonthText: document.getElementById('current-month-text'),
+      currentMonthStatus: document.getElementById('current-month-status'),
+      sentimentHistoryChart: document.getElementById('sentiment-history-chart'),
+      sentimentHistoryTable: document.getElementById('sentiment-history-table'),
+      sentimentHistoryTbody: document.getElementById('sentiment-history-tbody')
+    };
+  }
+
+  /**
+   * Setup event listeners
+   */
+  function setupEventListeners() {
+    // Case search
+    if (elements.caseSearch) {
+      elements.caseSearch.addEventListener('input', debounce(filterCases, 300));
+    }
+
+    // Window events
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('focus', handleWindowFocus);
+    
+    // Live mode window tracking
+    if (elements.liveModeButton) {
+      elements.liveModeButton.addEventListener('click', openLiveMode);
+    }
+  }
+
+  /**
+   * Initialize Material Design Components
+   */
+  function initializeMDC() {
+    try {
+      // Auto-upgrade all MDC components
+      if (typeof componentHandler !== 'undefined') {
+        componentHandler.upgradeAllRegistered();
+      }
+      
+      // Initialize specific components if needed
+      const dialogs = document.querySelectorAll('.mdl-dialog');
+      dialogs.forEach(dialog => {
+        if (!dialog.showModal) {
+          dialogPolyfill.registerDialog(dialog);
+        }
+      });
+      
+    } catch (error) {
+      console.warn('MDC initialization warning:', error);
+    }
+  }
+
+  /**
+   * Load initial application data
+   */
+  async function loadInitialData() {
+    try {
+      showLoading(true);
+      
+      // Load user info and UI configuration
+      const userResponse = await callServerFunction('getCurrentUser');
+      if (userResponse.success) {
+        appState.currentUser = userResponse.data;
+        updateUserInterface(userResponse.data);
+      }
+      
+      // Load available sheet types
+      const sheetTypesResponse = await callServerFunction('getAvailableSheetTypes');
+      if (sheetTypesResponse.success) {
+        appState.sheetTypes = sheetTypesResponse.data;
+        populateSheetTypeSelects();
+      }
+      
+      // Load dashboard data
+      await loadDashboardData();
+      
+      // Initialize and load sentiment functionality
+      if (window.CasesDashSentimentManager) {
+        await window.CasesDashSentimentManager.loadSentimentConfiguration();
+        await window.CasesDashSentimentManager.loadSentimentSummary();
+      }
+      
+    } catch (error) {
+      console.error('Failed to load initial data:', error);
+      showError('Failed to load application data. Some features may not work properly.');
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  /**
+   * Load dashboard data
+   */
+  async function loadDashboardData() {
+    try {
+      const response = await callServerFunction('getDashboardStats');
+      if (response.success) {
+        appState.dashboardData = response.data;
+        updateDashboard(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to load dashboard data:', error);
+    }
+  }
+
+  /**
+   * Update dashboard display
+   */
+  function updateDashboard(data) {
+    if (!data) return;
+
+    // Update stats
+    if (elements.myCasesCount) {
+      elements.myCasesCount.textContent = data.myCases || 0;
+    }
+    if (elements.openCasesCount) {
+      elements.openCasesCount.textContent = data.openCases || 0;
+    }
+    if (elements.closedTodayCount) {
+      elements.closedTodayCount.textContent = data.closedToday || 0;
+    }
+    if (elements.totalCasesCount) {
+      elements.totalCasesCount.textContent = data.totalCases || 0;
+    }
+
+    // Update recent activity
+    if (elements.recentActivity && data.recentActivity) {
+      updateRecentActivity(data.recentActivity);
+    }
+  }
+
+  /**
+   * Update recent activity display
+   */
+  function updateRecentActivity(activities) {
+    if (!elements.recentActivity) return;
+
+    if (!activities || activities.length === 0) {
+      elements.recentActivity.innerHTML = '<p>No recent activity</p>';
+      return;
+    }
+
+    const activityHTML = activities.map(activity => `
+      <div class="activity-item" style="padding: 8px 0; border-bottom: 1px solid #eee;">
+        <div style="font-weight: 500;">${escapeHtml(activity.description || 'Unknown activity')}</div>
+        <div style="font-size: 12px; color: #666; margin-top: 4px;">
+          ${formatRelativeTime(activity.timestamp)}
+        </div>
+      </div>
+    `).join('');
+
+    elements.recentActivity.innerHTML = activityHTML;
+  }
+
+  /**
+   * Update user interface based on user role
+   */
+  function updateUserInterface(userData) {
+    // Store user email in localStorage for client-side access
+    if (userData.email) {
+      localStorage.setItem('casesdash_user_email', userData.email);
+      window.currentUserEmail = userData.email; // Global fallback
+    }
+    
+    // Show/hide admin navigation
+    const adminNav = document.getElementById('admin-nav');
+    if (adminNav && userData.role === 'admin') {
+      adminNav.style.display = 'block';
+    }
+
+    // Update user display if needed
+    console.log('User loaded:', userData.email, 'Role:', userData.role);
+  }
+
+  /**
+   * Populate sheet type select elements
+   */
+  function populateSheetTypeSelects() {
+    const selects = document.querySelectorAll('select[id*="sheet-type"]');
+    selects.forEach(select => {
+      // Clear existing options except "All" option
+      const options = Array.from(select.options);
+      options.forEach(option => {
+        if (option.value !== '') {
+          option.remove();
+        }
+      });
+
+      // Add sheet type options
+      appState.sheetTypes.forEach(sheetType => {
+        const option = document.createElement('option');
+        option.value = sheetType;
+        option.textContent = sheetType;
+        select.appendChild(option);
+      });
+    });
+  }
+
+  /**
+   * Open Live Mode window
+   */
+  function openLiveMode() {
+    try {
+      if (appState.liveModeWindow && !appState.liveModeWindow.closed) {
+        // Focus existing window
+        appState.liveModeWindow.focus();
+        return;
+      }
+
+      // Get current web app URL
+      const currentUrl = window.location.href;
+      const baseUrl = currentUrl.split('?')[0];
+      const liveModeUrl = `${baseUrl}?page=live-mode`;
+
+      // Open new window with specific dimensions
+      const windowFeatures = [
+        'width=1200',
+        'height=800',
+        'left=100',
+        'top=100',
+        'resizable=yes',
+        'scrollbars=yes',
+        'status=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no'
+      ].join(',');
+
+      appState.liveModeWindow = window.open(liveModeUrl, 'CasesDashLiveMode', windowFeatures);
+
+      if (!appState.liveModeWindow) {
+        throw new Error('Failed to open Live Mode window. Please check popup blocker settings.');
+      }
+
+      // Show success message
+      showToast('Live Mode window opened successfully', 'success');
+
+      // Monitor window status
+      const checkClosed = setInterval(() => {
+        if (appState.liveModeWindow.closed) {
+          clearInterval(checkClosed);
+          appState.liveModeWindow = null;
+          console.log('Live Mode window closed');
+        }
+      }, 1000);
+
+    } catch (error) {
+      console.error('Failed to open Live Mode:', error);
+      showError(error.message || 'Failed to open Live Mode window');
+    }
+  }
+
+  /**
+   * Navigation functions
+   */
+  function showDashboard() {
+    switchView('dashboard');
+    loadDashboardData();
+  }
+
+  function showCaseList() {
+    try {
+      switchView('case-list');
+      
+      // Initialize CaseManagerModule if available
+      if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.initialize === 'function') {
+        window.CasesDashCaseManager.initialize();
+        window.CasesDashCaseManager.loadUserCases();
+      } else {
+        // Fallback to legacy approach
+        console.warn('CaseManagerModule not available, using legacy approach');
+        loadUserCases();
+      }
+    } catch (error) {
+      console.error('ケースリスト表示エラー:', error);
+      showError('ケースリストの表示に失敗しました: ' + error.message);
+    }
+  }
+
+  function showCreateCase() {
+    try {
+      // Check if CaseManagerModule is available and properly initialized
+      if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.createNewCase === 'function') {
+        // Use the new integrated case creation flow
+        window.CasesDashCaseManager.createNewCase();
+      } else {
+        // Fallback to legacy form approach
+        console.warn('CaseManagerModule not available, using legacy form approach');
+        switchView('case-form');
+        setupCaseForm();
+      }
+    } catch (error) {
+      console.error('ケース作成エラー:', error);
+      showError('ケース作成フォームの表示に失敗しました: ' + error.message);
+    }
+  }
+
+  function showAdvancedSearch() {
+    switchView('search');
+  }
+
+
+  /**
+   * Switch between views with smooth animations
+   */
+  function switchView(viewName) {
+    const currentView = document.querySelector('.view-container:not([style*="display: none"])');
+    const targetView = elements[viewName + 'View'];
+    
+    if (!targetView || targetView === currentView) return;
+    
+    // Update navigation active state
+    updateNavigationState(viewName);
+    
+    // Perform animated transition
+    if (currentView) {
+      // Fade out current view
+      currentView.style.opacity = '0';
+      currentView.style.transform = 'translateY(-20px)';
+      
+      setTimeout(() => {
+        currentView.style.display = 'none';
+        showTargetView(targetView, viewName);
+      }, 200);
+    } else {
+      showTargetView(targetView, viewName);
+    }
+  }
+  
+  /**
+   * Show target view with entrance animation
+   */
+  function showTargetView(targetView, viewName) {
+    // Reset styles and show
+    targetView.style.display = 'block';
+    targetView.style.opacity = '0';
+    targetView.style.transform = 'translateY(20px)';
+    
+    // Trigger reflow
+    targetView.offsetHeight;
+    
+    // Animate in
+    targetView.style.transition = 'all 0.3s cubic-bezier(0.2, 0, 0, 1)';
+    targetView.style.opacity = '1';
+    targetView.style.transform = 'translateY(0)';
+    
+    // Update app state
+    appState.currentView = viewName;
+    
+    // Initialize view-specific features
+    initializeViewFeatures(viewName);
+    
+    // Clean up transition styles
+    setTimeout(() => {
+      targetView.style.transition = '';
+    }, 300);
+  }
+  
+  /**
+   * Update navigation active state
+   */
+  function updateNavigationState(viewName) {
+    const navLinks = document.querySelectorAll('.nav-link');
+    navLinks.forEach(link => {
+      link.classList.remove('active');
+      if (link.getAttribute('data-view') === viewName) {
+        link.classList.add('active');
+      }
+    });
+  }
+  
+  /**
+   * Initialize view-specific features
+   */
+  function initializeViewFeatures(viewName) {
+    switch (viewName) {
+      case 'case-list':
+        initializeEnterpriseTable();
+        loadCaseData();
+        break;
+      case 'dashboard':
+        initializeDashboardRealtime();
+        break;
+      case 'sentiment':
+        initializeSentimentCharts();
+        break;
+      case 'search':
+        initializeAdvancedSearch();
+        break;
+    }
+  }
+
+  /**
+   * Load user cases
+   */
+  async function loadUserCases() {
+    // Implementation would go here
+    console.log('Loading user cases...');
+  }
+
+  /**
+   * Setup case form with dynamic sheet type selection
+   */
+  async function setupCaseForm(editCaseData = null) {
+    try {
+      showLoading(true);
+      clearFormErrors();
+      
+      if (editCaseData) {
+        appState.formMode = 'edit';
+        appState.selectedSheetType = editCaseData.sheetType;
+        if (elements.formTitle) {
+          elements.formTitle.textContent = `Edit ${editCaseData.sheetType} Case`;
+        }
+      } else {
+        appState.formMode = 'create';
+        appState.selectedSheetType = null;
+        if (elements.formTitle) {
+          elements.formTitle.textContent = 'Create New Case';
+        }
+      }
+      
+      // Setup sheet type selector if not in edit mode
+      if (!editCaseData) {
+        setupSheetTypeSelector();
+      } else {
+        // Hide sheet type selector in edit mode
+        if (elements.sheetTypeSelector) {
+          elements.sheetTypeSelector.style.display = 'none';
+        }
+        // Generate form directly for edit mode
+        await generateDynamicForm(appState.selectedSheetType, editCaseData);
+      }
+      
+    } catch (error) {
+      console.error('Failed to setup case form:', error);
+      showError('Failed to setup case form. Please try again.');
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  /**
+   * Setup sheet type selector for new case creation
+   */
+  function setupSheetTypeSelector() {
+    if (!elements.sheetTypeSelector) {
+      console.warn('Sheet type selector element not found');
+      return;
+    }
+    
+    // Clear existing options
+    elements.sheetTypeSelector.innerHTML = '';
+    
+    // Add default option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Select Sheet Type';
+    defaultOption.disabled = true;
+    defaultOption.selected = true;
+    elements.sheetTypeSelector.appendChild(defaultOption);
+    
+    // Add sheet type options
+    appState.sheetTypes.forEach(sheetType => {
+      const option = document.createElement('option');
+      option.value = sheetType;
+      option.textContent = sheetType;
+      elements.sheetTypeSelector.appendChild(option);
+    });
+    
+    // Add change event listener
+    elements.sheetTypeSelector.addEventListener('change', handleSheetTypeChange);
+    
+    // Show selector
+    elements.sheetTypeSelector.style.display = 'block';
+    
+    // Clear form container
+    if (elements.formContainer) {
+      elements.formContainer.innerHTML = '';
+    }
+  }
+
+  /**
+   * Handle sheet type selection change
+   */
+  async function handleSheetTypeChange(event) {
+    const selectedSheetType = event.target.value;
+    
+    if (!selectedSheetType) {
+      if (elements.formContainer) {
+        elements.formContainer.innerHTML = '';
+      }
+      return;
+    }
+    
+    try {
+      showLoading(true);
+      appState.selectedSheetType = selectedSheetType;
+      
+      // Update form title
+      if (elements.formTitle) {
+        elements.formTitle.textContent = `Create New ${selectedSheetType} Case`;
+      }
+      
+      // Generate dynamic form for selected sheet type
+      await generateDynamicForm(selectedSheetType);
+      
+    } catch (error) {
+      console.error('Failed to handle sheet type change:', error);
+      showError('Failed to load form for selected sheet type.');
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  /**
+   * Generate dynamic form using FormGenerator
+   */
+  async function generateDynamicForm(sheetType, initialData = null) {
+    try {
+      if (!elements.formContainer) {
+        throw new Error('Form container element not found');
+      }
+      
+      // Clear previous form generator
+      if (appState.currentFormGenerator) {
+        appState.currentFormGenerator.destroy();
+        appState.currentFormGenerator = null;
+      }
+      
+      // Clear form container
+      elements.formContainer.innerHTML = '';
+      
+      // Create form container div
+      const formDiv = document.createElement('div');
+      formDiv.id = 'dynamic-form-container';
+      formDiv.className = 'casesdash-dynamic-form';
+      elements.formContainer.appendChild(formDiv);
+      
+      // Initialize FormGenerator with options
+      const formOptions = {
+        enableRealTimeValidation: true,
+        enableAutoSave: false,
+        showOptionalFields: true,
+        resetOnSuccess: appState.formMode === 'create',
+        onSuccess: handleFormSubmitSuccess,
+        onError: handleFormSubmitError,
+        onCancel: handleFormCancel
+      };
+      
+      appState.currentFormGenerator = new FormGenerator(sheetType, formOptions);
+      
+      // Generate the form
+      const formElement = appState.currentFormGenerator.generateForm('dynamic-form-container', initialData);
+      
+      if (!formElement) {
+        throw new Error('Failed to generate form element');
+      }
+      
+      // Add custom styling and behaviors
+      enhanceGeneratedForm(formElement, sheetType);
+      
+      console.log(`Dynamic form generated successfully for ${sheetType}`);
+      
+    } catch (error) {
+      console.error('Failed to generate dynamic form:', error);
+      showFormError('Failed to generate form. Please refresh and try again.');
+      throw error;
+    }
+  }
+
+  /**
+   * Enhance generated form with custom styling and behaviors
+   */
+  function enhanceGeneratedForm(formElement, sheetType) {
+    try {
+      // Add sheet type indicator
+      const sheetIndicator = document.createElement('div');
+      sheetIndicator.className = 'casesdash-sheet-indicator mdc-chip-set';
+      sheetIndicator.innerHTML = `
+        <div class="mdc-chip mdc-chip--selected">
+          <div class="mdc-chip__ripple"></div>
+          <span class="mdc-chip__text">${escapeHtml(sheetType)}</span>
+        </div>
+      `;
+      formElement.insertBefore(sheetIndicator, formElement.firstChild);
+      
+      // Add form validation summary
+      const validationSummary = document.createElement('div');
+      validationSummary.id = 'form-validation-summary';
+      validationSummary.className = 'casesdash-validation-summary';
+      validationSummary.style.display = 'none';
+      formElement.insertBefore(validationSummary, formElement.lastChild);
+      
+      // Setup advanced field behaviors
+      setupAdvancedFieldBehaviors(formElement, sheetType);
+      
+    } catch (error) {
+      console.warn('Failed to enhance generated form:', error);
+    }
+  }
+
+  /**
+   * Setup advanced field behaviors based on sheet type
+   */
+  function setupAdvancedFieldBehaviors(formElement, sheetType) {
+    try {
+      // Auto-generate Case ID if empty
+      const caseIdField = formElement.querySelector('#field-caseId');
+      if (caseIdField && !caseIdField.value) {
+        generateCaseId(sheetType).then(caseId => {
+          if (caseId) {
+            caseIdField.value = caseId;
+            // Trigger input event to update validation
+            caseIdField.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }).catch(error => {
+          console.warn('Failed to generate case ID:', error);
+        });
+      }
+      
+      // Setup conditional field visibility
+      setupConditionalFields(formElement, sheetType);
+      
+    } catch (error) {
+      console.warn('Failed to setup advanced field behaviors:', error);
+    }
+  }
+
+  /**
+   * Generate unique case ID
+   */
+  async function generateCaseId(sheetType) {
+    try {
+      const response = await callServerFunction('generateCaseId', sheetType);
+      return response.success ? response.data : null;
+    } catch (error) {
+      console.error('Failed to generate case ID:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Setup conditional field visibility
+   */
+  function setupConditionalFields(formElement, sheetType) {
+    // Implementation specific to sheet type requirements
+    if (sheetType.includes('3PO')) {
+      // 3PO specific field behaviors
+      const issueCategoryField = formElement.querySelector('#field-issueCategory');
+      const detailsField = formElement.querySelector('#field-details');
+      
+      if (issueCategoryField && detailsField) {
+        issueCategoryField.addEventListener('change', (e) => {
+          const detailsWrapper = detailsField.closest('.casesdash-form__field-wrapper');
+          if (e.target.value === 'Technical') {
+            detailsWrapper.classList.add('casesdash-field-highlight');
+          } else {
+            detailsWrapper.classList.remove('casesdash-field-highlight');
+          }
+        });
+      }
+    }
+  }
+
+  /**
+   * Handle form submit success
+   */
+  function handleFormSubmitSuccess(result) {
+    try {
+      const message = `Case ${result.caseId || result.id} ${appState.formMode}d successfully!`;
+      showToast(message, 'success');
+      
+      // Refresh dashboard data
+      loadDashboardData();
+      
+      // Navigate back to dashboard or case list
+      if (appState.formMode === 'create') {
+        showDashboard();
+      } else {
+        showCaseList();
+      }
+      
+    } catch (error) {
+      console.error('Error handling form success:', error);
+    }
+  }
+
+  /**
+   * Handle form submit error
+   */
+  function handleFormSubmitError(error) {
+    try {
+      const message = error.message || `Failed to ${appState.formMode} case. Please try again.`;
+      showFormError(message);
+      showError(message);
+      
+    } catch (err) {
+      console.error('Error handling form error:', err);
+    }
+  }
+
+  /**
+   * Handle form cancel
+   */
+  function handleFormCancel() {
+    try {
+      // Clean up form generator
+      if (appState.currentFormGenerator) {
+        appState.currentFormGenerator.destroy();
+        appState.currentFormGenerator = null;
+      }
+      
+      // Navigate back
+      showDashboard();
+      
+    } catch (error) {
+      console.error('Error handling form cancel:', error);
+    }
+  }
+
+  /**
+   * Show form-specific error
+   */
+  function showFormError(message) {
+    if (elements.formErrorContainer) {
+      elements.formErrorContainer.innerHTML = `
+        <div class="mdc-banner" role="banner">
+          <div class="mdc-banner__content">
+            <div class="mdc-banner__graphic-text-wrapper">
+              <div class="mdc-banner__text">${escapeHtml(message)}</div>
+            </div>
+          </div>
+        </div>
+      `;
+      elements.formErrorContainer.style.display = 'block';
+    }
+  }
+
+  /**
+   * Clear form errors
+   */
+  function clearFormErrors() {
+    if (elements.formErrorContainer) {
+      elements.formErrorContainer.innerHTML = '';
+      elements.formErrorContainer.style.display = 'none';
+    }
+  }
+
+  /**
+   * Load case data for editing
+   */
+  async function loadCaseForEditing(caseId, sheetType) {
+    try {
+      showLoading(true);
+      
+      const response = await callServerFunction('getCaseById', caseId, sheetType);
+      
+      if (response.success && response.data) {
+        // Switch to form view
+        switchView('case-form');
+        
+        // Setup form for editing
+        await setupCaseForm({
+          ...response.data,
+          sheetType: sheetType
+        });
+      } else {
+        showError('Failed to load case data for editing.');
+      }
+      
+    } catch (error) {
+      console.error('Failed to load case for editing:', error);
+      showError('Failed to load case for editing.');
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  /**
+   * Filter cases based on search input
+   */
+  function filterCases() {
+    // Implementation would go here
+    console.log('Filtering cases...');
+  }
+
+  /**
+   * Handle window before unload
+   */
+  function handleBeforeUnload() {
+    // Close live mode window if open
+    if (appState.liveModeWindow && !appState.liveModeWindow.closed) {
+      appState.liveModeWindow.close();
+    }
+  }
+
+  /**
+   * Handle window focus
+   */
+  function handleWindowFocus() {
+    // Refresh dashboard data when window regains focus
+    if (appState.currentView === 'dashboard') {
+      loadDashboardData();
+    }
+  }
+
+  /**
+   * Show loading overlay
+   */
+  function showLoading(show) {
+    if (elements.loadingOverlay) {
+      elements.loadingOverlay.style.display = show ? 'flex' : 'none';
+    }
+  }
+
+  /**
+   * Show error message
+   */
+  function showError(message) {
+    showToast(message, 'error');
+  }
+
+  /**
+   * Show toast notification
+   */
+  function showToast(message, type = 'info') {
+    if (elements.toast) {
+      const snackbar = elements.toast.MaterialSnackbar;
+      if (snackbar) {
+        snackbar.showSnackbar({
+          message: message,
+          timeout: 4000
+        });
+      }
+    }
+  }
+
+  /**
+   * Call server function
+   */
+  function callServerFunction(functionName, ...args) {
+    return new Promise((resolve, reject) => {
+      try {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          [functionName](...args);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Get current user email for client-side use
+   */
+  function getCurrentUser() {
+    // Return current user email if available
+    if (appState.currentUser && appState.currentUser.email) {
+      return appState.currentUser.email;
+    }
+    
+    // Check localStorage
+    const storedEmail = localStorage.getItem('casesdash_user_email');
+    if (storedEmail) {
+      return storedEmail;
+    }
+    
+    // Check global variable
+    if (window.currentUserEmail) {
+      return window.currentUserEmail;
+    }
+    
+    // Default fallback
+    console.warn('⚠️ User email not available in client context');
+    return 'unknown@example.com';
+  }
+
+  /**
+   * Utility functions
+   */
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  function escapeHtml(text) {
+    if (typeof text !== 'string') return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function formatRelativeTime(timestamp) {
+    if (!timestamp) return 'Unknown time';
+    
+    try {
+      const date = new Date(timestamp);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins} minutes ago`;
+      if (diffHours < 24) return `${diffHours} hours ago`;
+      if (diffDays < 7) return `${diffDays} days ago`;
+      
+      return date.toLocaleDateString();
+    } catch (error) {
+      return 'Invalid date';
+    }
+  }
+
+  /**
+   * Enterprise Table Management System
+   */
+  
+  // Table state management
+  let tableState = {
+    currentPage: 1,
+    rowsPerPage: 25,
+    sortField: null,
+    sortDirection: 'asc',
+    filters: {},
+    searchQuery: '',
+    selectedRows: new Set(),
+    totalRows: 0,
+    data: []
+  };
+  
+  /**
+   * Initialize enterprise table with all features
+   */
+  function initializeEnterpriseTable() {
+    console.log('🚀 Initializing Enterprise Table...');
+    
+    // Setup table controls
+    setupTableFilters();
+    setupTableSorting();
+    setupTablePagination();
+    setupTableSelection();
+    setupTableSearch();
+    setupTableActions();
+    
+    // Load initial data
+    loadCaseData();
+    
+    console.log('✅ Enterprise Table initialized');
+  }
+  
+  /**
+   * Setup table filters
+   */
+  function setupTableFilters() {
+    const statusFilter = document.getElementById('status-filter');
+    const typeFilter = document.getElementById('type-filter');
+    const dateFrom = document.getElementById('date-from');
+    const dateTo = document.getElementById('date-to');
+    
+    if (statusFilter) {
+      statusFilter.addEventListener('change', () => {
+        tableState.filters.status = statusFilter.value;
+        applyTableFilters();
+      });
+    }
+    
+    if (typeFilter) {
+      typeFilter.addEventListener('change', () => {
+        tableState.filters.type = typeFilter.value;
+        applyTableFilters();
+      });
+    }
+    
+    if (dateFrom) {
+      dateFrom.addEventListener('change', () => {
+        tableState.filters.dateFrom = dateFrom.value;
+        applyTableFilters();
+      });
+    }
+    
+    if (dateTo) {
+      dateTo.addEventListener('change', () => {
+        tableState.filters.dateTo = dateTo.value;
+        applyTableFilters();
+      });
+    }
+  }
+  
+  /**
+   * Setup table sorting
+   */
+  function setupTableSorting() {
+    const sortableHeaders = document.querySelectorAll('.sortable');
+    
+    sortableHeaders.forEach(header => {
+      header.addEventListener('click', () => {
+        const field = header.getAttribute('data-sort');
+        if (!field) return;
+        
+        // Update sort state
+        if (tableState.sortField === field) {
+          tableState.sortDirection = tableState.sortDirection === 'asc' ? 'desc' : 'asc';
+        } else {
+          tableState.sortField = field;
+          tableState.sortDirection = 'asc';
+        }
+        
+        // Update UI
+        updateSortIndicators();
+        
+        // Apply sort
+        applySorting();
+      });
+    });
+  }
+  
+  /**
+   * Update sort indicators in headers
+   */
+  function updateSortIndicators() {
+    const sortableHeaders = document.querySelectorAll('.sortable');
+    
+    sortableHeaders.forEach(header => {
+      header.classList.remove('sort-asc', 'sort-desc');
+      const indicator = header.querySelector('.sort-indicator .material-symbols-outlined');
+      
+      if (header.getAttribute('data-sort') === tableState.sortField) {
+        header.classList.add(`sort-${tableState.sortDirection}`);
+        if (indicator) {
+          indicator.textContent = tableState.sortDirection === 'asc' ? 'expand_less' : 'expand_more';
+        }
+      } else {
+        if (indicator) {
+          indicator.textContent = 'unfold_more';
+        }
+      }
+    });
+  }
+  
+  /**
+   * Setup table pagination
+   */
+  function setupTablePagination() {
+    const rowsPerPageSelect = document.getElementById('rows-per-page');
+    const firstPageBtn = document.getElementById('first-page');
+    const prevPageBtn = document.getElementById('prev-page');
+    const nextPageBtn = document.getElementById('next-page');
+    const lastPageBtn = document.getElementById('last-page');
+    
+    if (rowsPerPageSelect) {
+      rowsPerPageSelect.addEventListener('change', () => {
+        tableState.rowsPerPage = parseInt(rowsPerPageSelect.value);
+        tableState.currentPage = 1;
+        updateTableData();
+      });
+    }
+    
+    if (firstPageBtn) {
+      firstPageBtn.addEventListener('click', () => {
+        tableState.currentPage = 1;
+        updateTableData();
+      });
+    }
+    
+    if (prevPageBtn) {
+      prevPageBtn.addEventListener('click', () => {
+        if (tableState.currentPage > 1) {
+          tableState.currentPage--;
+          updateTableData();
+        }
+      });
+    }
+    
+    if (nextPageBtn) {
+      nextPageBtn.addEventListener('click', () => {
+        const maxPages = Math.ceil(tableState.totalRows / tableState.rowsPerPage);
+        if (tableState.currentPage < maxPages) {
+          tableState.currentPage++;
+          updateTableData();
+        }
+      });
+    }
+    
+    if (lastPageBtn) {
+      lastPageBtn.addEventListener('click', () => {
+        const maxPages = Math.ceil(tableState.totalRows / tableState.rowsPerPage);
+        tableState.currentPage = maxPages;
+        updateTableData();
+      });
+    }
+  }
+  
+  /**
+   * Setup table selection
+   */
+  function setupTableSelection() {
+    const selectAllCheckbox = document.getElementById('select-all');
+    
+    if (selectAllCheckbox) {
+      selectAllCheckbox.addEventListener('change', (e) => {
+        const isChecked = e.target.checked;
+        const rowCheckboxes = document.querySelectorAll('.enterprise-table tbody input[type="checkbox"]');
+        
+        rowCheckboxes.forEach(checkbox => {
+          checkbox.checked = isChecked;
+          const row = checkbox.closest('tr');
+          const rowId = row.getAttribute('data-row-id');
+          
+          if (isChecked) {
+            tableState.selectedRows.add(rowId);
+            row.classList.add('selected');
+          } else {
+            tableState.selectedRows.delete(rowId);
+            row.classList.remove('selected');
+          }
+        });
+        
+        updateSelectionUI();
+      });
+    }
+  }
+  
+  /**
+   * Setup table search
+   */
+  function setupTableSearch() {
+    const refreshBtn = document.getElementById('refresh-table');
+    const exportBtn = document.getElementById('export-btn');
+    const settingsBtn = document.getElementById('table-settings');
+    
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => {
+        showTableLoading();
+        loadCaseData();
+      });
+    }
+    
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        exportTableData();
+      });
+    }
+    
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', () => {
+        showTableSettings();
+      });
+    }
+  }
+  
+  /**
+   * Setup table actions
+   */
+  function setupTableActions() {
+    // Actions will be setup when rows are rendered
+  }
+  
+  /**
+   * Apply table filters
+   */
+  function applyTableFilters() {
+    tableState.currentPage = 1;
+    updateTableData();
+  }
+  
+  /**
+   * Apply sorting to table data
+   */
+  function applySorting() {
+    const { sortField, sortDirection } = tableState;
+    
+    if (!sortField) return;
+    
+    tableState.data.sort((a, b) => {
+      let aVal = a[sortField];
+      let bVal = b[sortField];
+      
+      // Handle different data types
+      if (typeof aVal === 'string') {
+        aVal = aVal.toLowerCase();
+        bVal = bVal.toLowerCase();
+      }
+      
+      if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+    
+    renderTableData();
+  }
+  
+  /**
+   * Load case data from server
+   */
+  async function loadCaseData() {
+    try {
+      showTableLoading();
+      
+      const response = await callServerFunction('getAllCases', {
+        page: tableState.currentPage,
+        limit: tableState.rowsPerPage,
+        filters: tableState.filters,
+        search: tableState.searchQuery,
+        sort: {
+          field: tableState.sortField,
+          direction: tableState.sortDirection
+        }
+      });
+      
+      if (response.success) {
+        tableState.data = response.data.cases || [];
+        tableState.totalRows = response.data.total || 0;
+        
+        renderTableData();
+        updatePaginationInfo();
+      } else {
+        showTableError('Failed to load case data');
+      }
+      
+    } catch (error) {
+      console.error('Failed to load case data:', error);
+      showTableError('Failed to load case data. Please try again.');
+    }
+  }
+  
+  /**
+   * Update table data display
+   */
+  function updateTableData() {
+    loadCaseData();
+  }
+  
+  /**
+   * Render table data
+   */
+  function renderTableData() {
+    const tbody = document.getElementById('cases-table-body');
+    if (!tbody) return;
+    
+    if (tableState.data.length === 0) {
+      tbody.innerHTML = `
+        <tr class="table-empty">
+          <td colspan="9">
+            <div class="empty-state">
+              <div class="empty-icon">
+                <span class="material-symbols-outlined">inbox</span>
+              </div>
+              <div class="empty-title">No cases found</div>
+              <div class="empty-description">No cases match your current filters.</div>
+              <button class="btn btn-primary" onclick="showCreateCase()">
+                <span class="material-symbols-outlined">add</span>
+                Create New Case
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+    
+    const rowsHTML = tableState.data.map(caseData => {
+      const isSelected = tableState.selectedRows.has(caseData.id);
+      return generateTableRow(caseData, isSelected);
+    }).join('');
+    
+    tbody.innerHTML = rowsHTML;
+    
+    // Setup row event listeners
+    setupRowEventListeners();
+  }
+  
+  /**
+   * Generate table row HTML
+   */
+  function generateTableRow(caseData, isSelected = false) {
+    const progress = caseData.progress || 0;
+    const priority = caseData.priority || 'medium';
+    const status = caseData.status || 'open';
+    
+    return `
+      <tr data-row-id="${escapeHtml(caseData.id)}" class="${isSelected ? 'selected' : ''}">
+        <td class="select-column">
+          <label class="checkbox-container">
+            <input type="checkbox" ${isSelected ? 'checked' : ''}>
+            <span class="checkmark"></span>
+          </label>
+        </td>
+        <td>
+          <strong>${escapeHtml(caseData.caseId || caseData.id)}</strong>
+        </td>
+        <td>
+          <span class="type-badge">${escapeHtml(caseData.type || 'General')}</span>
+        </td>
+        <td>
+          <span class="status-badge-advanced status-${status}">
+            <span class="material-symbols-outlined">${getStatusIcon(status)}</span>
+            ${escapeHtml(status.replace('-', ' ').toUpperCase())}
+          </span>
+        </td>
+        <td>
+          <div class="priority-indicator priority-${priority}">
+            <span class="material-symbols-outlined priority-icon">${getPriorityIcon(priority)}</span>
+            ${escapeHtml(priority.toUpperCase())}
+          </div>
+        </td>
+        <td>
+          ${formatDate(caseData.openDate)}
+        </td>
+        <td>
+          <div class="assignee-info">
+            <span class="material-symbols-outlined">person</span>
+            ${escapeHtml(caseData.assignee || 'Unassigned')}
+          </div>
+        </td>
+        <td>
+          <div class="progress-container">
+            <div class="progress-bar">
+              <div class="progress-fill" style="width: ${progress}%"></div>
+            </div>
+            <span class="progress-text">${progress}%</span>
+          </div>
+        </td>
+        <td class="actions-column">
+          <div class="row-actions">
+            <button class="action-btn view-btn" onclick="viewCase('${escapeHtml(caseData.id)}')" title="View">
+              <span class="material-symbols-outlined">visibility</span>
+            </button>
+            <button class="action-btn edit-btn" onclick="editCase('${escapeHtml(caseData.id)}', '${escapeHtml(caseData.type)}')" title="Edit">
+              <span class="material-symbols-outlined">edit</span>
+            </button>
+            <button class="action-btn delete-btn" onclick="deleteCase('${escapeHtml(caseData.id)}')" title="Delete">
+              <span class="material-symbols-outlined">delete</span>
+            </button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+  
+  /**
+   * Get status icon
+   */
+  function getStatusIcon(status) {
+    const icons = {
+      'open': 'radio_button_unchecked',
+      'in-progress': 'pending',
+      'resolved': 'check_circle',
+      'closed': 'task_alt'
+    };
+    return icons[status] || 'radio_button_unchecked';
+  }
+  
+  /**
+   * Get priority icon
+   */
+  function getPriorityIcon(priority) {
+    const icons = {
+      'high': 'priority_high',
+      'medium': 'remove',
+      'low': 'expand_more'
+    };
+    return icons[priority] || 'remove';
+  }
+  
+  /**
+   * Format date for display
+   */
+  function formatDate(dateString) {
+    if (!dateString) return 'N/A';
+    
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      });
+    } catch (error) {
+      return 'Invalid Date';
+    }
+  }
+  
+  /**
+   * Setup row event listeners
+   */
+  function setupRowEventListeners() {
+    const checkboxes = document.querySelectorAll('.enterprise-table tbody input[type="checkbox"]');
+    
+    checkboxes.forEach(checkbox => {
+      checkbox.addEventListener('change', (e) => {
+        const row = e.target.closest('tr');
+        const rowId = row.getAttribute('data-row-id');
+        
+        if (e.target.checked) {
+          tableState.selectedRows.add(rowId);
+          row.classList.add('selected');
+        } else {
+          tableState.selectedRows.delete(rowId);
+          row.classList.remove('selected');
+        }
+        
+        updateSelectionUI();
+      });
+    });
+  }
+  
+  /**
+   * Update selection UI
+   */
+  function updateSelectionUI() {
+    const selectAllCheckbox = document.getElementById('select-all');
+    const selectedCount = tableState.selectedRows.size;
+    const totalVisible = tableState.data.length;
+    
+    if (selectAllCheckbox) {
+      selectAllCheckbox.indeterminate = selectedCount > 0 && selectedCount < totalVisible;
+      selectAllCheckbox.checked = selectedCount === totalVisible && totalVisible > 0;
+    }
+  }
+  
+  /**
+   * Update pagination info
+   */
+  function updatePaginationInfo() {
+    const pageInfo = document.getElementById('page-info');
+    const firstPageBtn = document.getElementById('first-page');
+    const prevPageBtn = document.getElementById('prev-page');
+    const nextPageBtn = document.getElementById('next-page');
+    const lastPageBtn = document.getElementById('last-page');
+    const pageNumbers = document.getElementById('page-numbers');
+    
+    const maxPages = Math.ceil(tableState.totalRows / tableState.rowsPerPage);
+    const startRow = (tableState.currentPage - 1) * tableState.rowsPerPage + 1;
+    const endRow = Math.min(tableState.currentPage * tableState.rowsPerPage, tableState.totalRows);
+    
+    if (pageInfo) {
+      pageInfo.textContent = `${startRow}-${endRow} of ${tableState.totalRows}`;
+    }
+    
+    // Update button states
+    if (firstPageBtn) firstPageBtn.disabled = tableState.currentPage === 1;
+    if (prevPageBtn) prevPageBtn.disabled = tableState.currentPage === 1;
+    if (nextPageBtn) nextPageBtn.disabled = tableState.currentPage === maxPages || maxPages === 0;
+    if (lastPageBtn) lastPageBtn.disabled = tableState.currentPage === maxPages || maxPages === 0;
+    
+    // Generate page numbers
+    if (pageNumbers) {
+      pageNumbers.innerHTML = generatePageNumbers(tableState.currentPage, maxPages);
+    }
+  }
+  
+  /**
+   * Generate page numbers HTML
+   */
+  function generatePageNumbers(currentPage, maxPages) {
+    let pages = [];
+    const maxVisible = 5;
+    
+    let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let end = Math.min(maxPages, start + maxVisible - 1);
+    
+    if (end - start < maxVisible - 1) {
+      start = Math.max(1, end - maxVisible + 1);
+    }
+    
+    for (let i = start; i <= end; i++) {
+      pages.push(`
+        <button class="page-number ${i === currentPage ? 'active' : ''}"
+                onclick="goToPage(${i})">${i}</button>
+      `);
+    }
+    
+    return pages.join('');
+  }
+  
+  /**
+   * Show table loading state
+   */
+  function showTableLoading() {
+    const tbody = document.getElementById('cases-table-body');
+    if (tbody) {
+      tbody.innerHTML = `
+        <tr class="loading-row">
+          <td colspan="9">
+            <div class="table-loading">
+              <div class="loading-spinner"></div>
+              <span>Loading cases...</span>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+  }
+  
+  /**
+   * Show table error
+   */
+  function showTableError(message) {
+    const tbody = document.getElementById('cases-table-body');
+    if (tbody) {
+      tbody.innerHTML = `
+        <tr class="table-error">
+          <td colspan="9">
+            <div class="error-state">
+              <span class="material-symbols-outlined" style="color: var(--md-sys-color-error);">error</span>
+              <span>${escapeHtml(message)}</span>
+              <button class="btn btn-secondary" onclick="loadCaseData()">
+                <span class="material-symbols-outlined">refresh</span>
+                Retry
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+  }
+  
+  /**
+   * Export table data
+   */
+  function exportTableData() {
+    console.log('🔄 Exporting table data...');
+    showToast('Export functionality coming soon!', 'info');
+  }
+  
+  /**
+   * Show table settings
+   */
+  function showTableSettings() {
+    console.log('⚙️ Opening table settings...');
+    showToast('Table settings coming soon!', 'info');
+  }
+  
+  /**
+   * Initialize dashboard realtime updates
+   */
+  function initializeDashboardRealtime() {
+    console.log('🚀 Initializing Dashboard Realtime...');
+    
+    // Update dashboard every 30 seconds
+    if (appState.dashboardInterval) {
+      clearInterval(appState.dashboardInterval);
+    }
+    
+    appState.dashboardInterval = setInterval(() => {
+      if (appState.currentView === 'dashboard') {
+        loadDashboardData();
+      }
+    }, 30000);
+  }
+  
+  /**
+   * Initialize sentiment charts
+   */
+  function initializeSentimentCharts() {
+    console.log('📊 Initializing Sentiment Charts...');
+    // Implementation will be handled by SentimentManager
+  }
+  
+  /**
+   * Initialize advanced search
+   */
+  function initializeAdvancedSearch() {
+    console.log('🔍 Initializing Advanced Search...');
+    // Implementation for advanced search features
+  }
+  
+  // Global functions for table operations
+  window.goToPage = function(page) {
+    tableState.currentPage = page;
+    updateTableData();
+  };
+  
+  window.viewCase = function(caseId) {
+    console.log('👁️ Viewing case:', caseId);
+    showToast(`Viewing case ${caseId}`, 'info');
+  };
+  
+  window.deleteCase = function(caseId) {
+    if (confirm(`Are you sure you want to delete case ${caseId}?`)) {
+      console.log('🗑️ Deleting case:', caseId);
+      showToast(`Case ${caseId} deleted`, 'success');
+      loadCaseData();
+    }
+  };
+
+  // Expose public API
+  return {
+    initialize,
+    showDashboard,
+    showCaseList,
+    showCreateCase,
+    showAdvancedSearch,
+    showReports,
+    openLiveMode,
+    getState: () => ({ ...appState }),
+    callServerFunction,
+    loadCaseForEditing,
+    setupCaseForm,
+    generateDynamicForm,
+    // New enterprise table functions
+    initializeEnterpriseTable,
+    loadCaseData,
+    tableState: () => ({ ...tableState }),
+    // Realtime features
+    initializeDashboardRealtime,
+    initializeSentimentCharts,
+    initializeAdvancedSearch,
+    // User management functions
+    getCurrentUser,
+    showLoading,
+    showError,
+    showToast
+  };
+})();
+
+// Global functions for HTML onclick handlers
+function showDashboard() {
+  window.CasesDashApp.showDashboard();
+}
+
+function showCaseList() {
+  window.CasesDashApp.showCaseList();
+}
+
+function showCreateCase() {
+  window.CasesDashApp.showCreateCase();
+}
+
+function showAdvancedSearch() {
+  window.CasesDashApp.showAdvancedSearch();
+}
+
+function showReports() {
+  window.CasesDashApp.showReports();
+}
+
+function openLiveMode() {
+  window.CasesDashApp.openLiveMode();
+}
+
+// CaseManagerModule integration global functions
+function generateCaseForm() {
+  if (window.CasesDashCaseManager) {
+    return window.CasesDashCaseManager.generateCaseForm();
+  }
+}
+
+function proceedWithSelectedSheetType() {
+  if (window.CasesDashCaseManager) {
+    return window.CasesDashCaseManager.proceedWithSelectedSheetType();
+  }
+}
+
+function closeSheetTypeDialog() {
+  if (window.CasesDashCaseManager) {
+    return window.CasesDashCaseManager.closeSheetTypeDialog();
+  }
+}
+
+function closeCaseCreationDialog() {
+  if (window.CasesDashCaseManager) {
+    return window.CasesDashCaseManager.closeCaseCreationDialog();
+  }
+}
+
+// ========================================
+// ENTERPRISE USER MANAGEMENT FUNCTIONS
+// ========================================
+
+/**
+ * Show user profile with authentication details
+ */
+function showUserProfile() {
+  try {
+    if (!appState.currentUser) {
+      showError('User information not available. Please refresh the page.');
+      return;
+    }
+
+    const profileModal = createUserProfileModal(appState.currentUser);
+    document.body.appendChild(profileModal);
+    profileModal.showModal();
+    
+  } catch (error) {
+    console.error('Failed to show user profile:', error);
+    showError('Failed to load user profile.');
+  }
+}
+
+/**
+ * Create user profile modal
+ */
+function createUserProfileModal(userData) {
+  const modal = document.createElement('dialog');
+  modal.className = 'mdl-dialog casesdash-modal';
+  modal.id = 'user-profile-modal';
+  
+  modal.innerHTML = `
+    <div class="mdl-dialog__content">
+      <h4 class="mdl-dialog__title">
+        <span class="material-symbols-outlined">person</span>
+        User Profile
+      </h4>
+      <div class="user-profile-content">
+        <div class="profile-section">
+          <h5>Authentication Details</h5>
+          <div class="profile-field">
+            <label>Email:</label>
+            <span>${escapeHtml(userData.email || 'Unknown')}</span>
+          </div>
+          <div class="profile-field">
+            <label>Role:</label>
+            <span class="role-badge role-${userData.role}">${escapeHtml(userData.role || 'user')}</span>
+          </div>
+          <div class="profile-field">
+            <label>Last Login:</label>
+            <span>${formatRelativeTime(userData.lastLogin)}</span>
+          </div>
+        </div>
+        
+        <div class="profile-section">
+          <h5>Permissions</h5>
+          <div class="permissions-list">
+            ${generatePermissionsList(userData.role)}
+          </div>
+        </div>
+        
+        <div class="profile-section">
+          <h5>System Information</h5>
+          <div class="profile-field">
+            <label>Spreadsheet Access:</label>
+            <span class="status-indicator ${appState.spreadsheetConfigured ? 'connected' : 'disconnected'}">
+              ${appState.spreadsheetConfigured ? 'Connected' : 'Not Configured'}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mdl-dialog__actions">
+      <button type="button" class="mdl-button mdl-button--colored" onclick="closeUserProfileModal()">
+        Close
+      </button>
+    </div>
+  `;
+  
+  return modal;
+}
+
+/**
+ * Generate permissions list based on user role
+ */
+function generatePermissionsList(role) {
+  const permissions = {
+    admin: [
+      'View all cases',
+      'Edit all cases',
+      'Access audit logs',
+      'System configuration',
+      'User management',
+      'Export data',
+      'TRT reports'
+    ],
+    teamLeader: [
+      'View team cases',
+      'Edit team cases',
+      'Team reports',
+      'Export team data',
+      'TRT monitoring'
+    ],
+    user: [
+      'View own cases',
+      'Edit own cases',
+      'Personal reports',
+      'Sentiment scoring'
+    ]
+  };
+  
+  const userPermissions = permissions[role] || permissions.user;
+  return userPermissions.map(permission =>
+    `<div class="permission-item"><span class="material-symbols-outlined">check_circle</span>${permission}</div>`
+  ).join('');
+}
+
+/**
+ * Close user profile modal
+ */
+function closeUserProfileModal() {
+  const modal = document.getElementById('user-profile-modal');
+  if (modal) {
+    modal.close();
+    modal.remove();
+  }
+}
+
+/**
+ * Show settings with spreadsheet configuration
+ */
+function showSettings() {
+  try {
+    const settingsModal = createSettingsModal();
+    document.body.appendChild(settingsModal);
+    settingsModal.showModal();
+    
+    // Load current configuration
+    loadSettingsData();
+    
+  } catch (error) {
+    console.error('Failed to show settings:', error);
+    showError('Failed to load settings.');
+  }
+}
+
+/**
+ * Create settings modal with spreadsheet configuration
+ */
+function createSettingsModal() {
+  const modal = document.createElement('dialog');
+  modal.className = 'mdl-dialog casesdash-modal settings-modal';
+  modal.id = 'settings-modal';
+  
+  modal.innerHTML = `
+    <div class="mdl-dialog__content">
+      <h4 class="mdl-dialog__title">
+        <span class="material-symbols-outlined">settings</span>
+        System Settings
+      </h4>
+      
+      <div class="settings-tabs">
+        <div class="tab-buttons">
+          <button class="tab-button active" data-tab="spreadsheet">Spreadsheet</button>
+          <button class="tab-button" data-tab="notifications">Notifications</button>
+          <button class="tab-button" data-tab="preferences">Preferences</button>
+        </div>
+        
+        <!-- Spreadsheet Configuration Tab -->
+        <div class="tab-content active" id="spreadsheet-tab">
+          <h5>Spreadsheet Configuration</h5>
+          <div class="settings-section">
+            <div class="mdl-textfield mdl-js-textfield mdl-textfield--floating-label">
+              <input class="mdl-textfield__input" type="text" id="spreadsheet-id" placeholder="Enter spreadsheet ID">
+              <label class="mdl-textfield__label" for="spreadsheet-id">Spreadsheet ID</label>
+            </div>
+            <div class="help-text">
+              Copy the spreadsheet ID from the URL: https://docs.google.com/spreadsheets/d/<strong>SPREADSHEET_ID</strong>/edit
+            </div>
+            
+            <div class="connection-status" id="connection-status">
+              <div class="status-indicator disconnected">
+                <span class="material-symbols-outlined">link_off</span>
+                Not Connected
+              </div>
+            </div>
+            
+            <div class="settings-actions">
+              <button class="mdl-button mdl-button--raised mdl-button--colored" onclick="testSpreadsheetConnection()">
+                <span class="material-symbols-outlined">link</span>
+                Test Connection
+              </button>
+              <button class="mdl-button mdl-button--raised mdl-button--accent" onclick="configureSpreadsheet()">
+                <span class="material-symbols-outlined">save</span>
+                Save Configuration
+              </button>
+            </div>
+            
+            <div class="sheet-validation" id="sheet-validation" style="display: none;">
+              <h6>Sheet Validation Results:</h6>
+              <div id="validation-results"></div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Notifications Tab -->
+        <div class="tab-content" id="notifications-tab">
+          <h5>Notification Settings</h5>
+          <div class="settings-section">
+            <!-- Google Chat Configuration -->
+            <div class="notification-setting">
+              <h6>Google Chat Integration</h6>
+              <div class="mdl-textfield mdl-js-textfield mdl-textfield--floating-label">
+                <input class="mdl-textfield__input" type="url" id="google-chat-webhook-url" placeholder="https://chat.googleapis.com/v1/spaces/...">
+                <label class="mdl-textfield__label" for="google-chat-webhook-url">Google Chat Webhook URL</label>
+              </div>
+              <div class="help-text">
+                Create a webhook in Google Chat space and paste the URL here to enable notifications.
+              </div>
+              
+              <div class="webhook-actions">
+                <button class="mdl-button mdl-button--raised" onclick="testWebhookConnection()">
+                  <span class="material-symbols-outlined">link</span>
+                  Test Connection
+                </button>
+              </div>
+            </div>
+            
+            <!-- P95 Monitoring Settings -->
+            <div class="notification-setting">
+              <label class="mdl-switch mdl-js-switch mdl-js-ripple-effect">
+                <input type="checkbox" id="p95-monitoring" class="mdl-switch__input">
+                <span class="mdl-switch__label">P95 Monitoring</span>
+              </label>
+              <div class="setting-description">
+                Enable automated P95 TRT monitoring and alerts
+              </div>
+              
+              <div class="p95-settings" id="p95-settings-panel" style="display: none; margin-top: 16px;">
+                <div class="mdl-textfield mdl-js-textfield mdl-textfield--floating-label">
+                  <input class="mdl-textfield__input" type="number" id="p95-alert-threshold" min="0.5" max="4" step="0.1" value="2.0">
+                  <label class="mdl-textfield__label" for="p95-alert-threshold">Alert Threshold (hours)</label>
+                </div>
+                
+                <div class="mdl-textfield mdl-js-textfield mdl-textfield--floating-label">
+                  <input class="mdl-textfield__input" type="number" id="p95-warning-threshold" min="0.1" max="1.0" step="0.1" value="0.9">
+                  <label class="mdl-textfield__label" for="p95-warning-threshold">Warning Threshold (% of SLA)</label>
+                </div>
+                
+                <div class="mdl-textfield mdl-js-textfield mdl-textfield--floating-label">
+                  <select class="mdl-textfield__input" id="daily-trigger-hour">
+                    ${Array.from({length: 24}, (_, i) =>
+                      `<option value="${i}" ${i === 9 ? 'selected' : ''}>${i.toString().padStart(2, '0')}:00</option>`
+                    ).join('')}
+                  </select>
+                  <label class="mdl-textfield__label" for="daily-trigger-hour">Daily Summary Time</label>
+                </div>
+              </div>
+            </div>
+            
+            <!-- TRT Alert Settings -->
+            <div class="notification-setting">
+              <label class="mdl-switch mdl-js-switch mdl-js-ripple-effect">
+                <input type="checkbox" id="trt-notifications" class="mdl-switch__input" checked>
+                <span class="mdl-switch__label">TRT(P95) Alerts</span>
+              </label>
+              <div class="setting-description">
+                Send Google Chat notifications when TRT timer reaches threshold
+              </div>
+            </div>
+            
+            <!-- Case Update Settings -->
+            <div class="notification-setting">
+              <label class="mdl-switch mdl-js-switch mdl-js-ripple-effect">
+                <input type="checkbox" id="case-updates" class="mdl-switch__input" checked>
+                <span class="mdl-switch__label">Case Updates</span>
+              </label>
+              <div class="setting-description">
+                Notify when cases are assigned or updated
+              </div>
+            </div>
+            
+            <!-- Team Leader Notifications -->
+            <div class="notification-setting">
+              <label class="mdl-switch mdl-js-switch mdl-js-ripple-effect">
+                <input type="checkbox" id="team-leader-notifications" class="mdl-switch__input">
+                <span class="mdl-switch__label">Team Leader Notifications</span>
+              </label>
+              <div class="setting-description">
+                Send notifications to team leaders for escalations
+              </div>
+            </div>
+            
+            <!-- Batch Alert Settings -->
+            <div class="notification-setting">
+              <label class="mdl-switch mdl-js-switch mdl-js-ripple-effect">
+                <input type="checkbox" id="batch-alerts" class="mdl-switch__input" checked>
+                <span class="mdl-switch__label">Batch Alerts</span>
+              </label>
+              <div class="setting-description">
+                Group multiple alerts into batch notifications
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Preferences Tab -->
+        <div class="tab-content" id="preferences-tab">
+          <h5>User Preferences</h5>
+          <div class="settings-section">
+            <div class="preference-setting">
+              <label for="theme-select">Theme:</label>
+              <select class="mdl-textfield__input" id="theme-select">
+                <option value="dark">Dark Mode</option>
+                <option value="light">Light Mode</option>
+                <option value="auto">Auto (System)</option>
+              </select>
+            </div>
+            
+            <div class="preference-setting">
+              <label for="rows-per-page-setting">Default Rows Per Page:</label>
+              <select class="mdl-textfield__input" id="rows-per-page-setting">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="mdl-dialog__actions">
+      <button type="button" class="mdl-button" onclick="closeSettingsModal()">
+        Cancel
+      </button>
+      <button type="button" class="mdl-button mdl-button--colored" onclick="saveSettings()">
+        Save Settings
+      </button>
+    </div>
+  `;
+  
+  // Setup tab switching
+  setTimeout(() => setupSettingsTabs(), 100);
+  
+  return modal;
+}
+
+/**
+ * Setup settings tabs functionality
+ */
+function setupSettingsTabs() {
+  const tabButtons = document.querySelectorAll('.tab-button');
+  const tabContents = document.querySelectorAll('.tab-content');
+  
+  tabButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      const targetTab = button.getAttribute('data-tab');
+      
+      // Update button states
+      tabButtons.forEach(btn => btn.classList.remove('active'));
+      button.classList.add('active');
+      
+      // Update content visibility
+      tabContents.forEach(content => {
+        content.classList.remove('active');
+        if (content.id === `${targetTab}-tab`) {
+          content.classList.add('active');
+        }
+      });
+    });
+  });
+}
+
+/**
+ * Load current settings data
+ */
+async function loadSettingsData() {
+  try {
+    // Load spreadsheet configuration
+    const configResponse = await callServerFunction('getSystemConfig');
+    if (configResponse.success) {
+      const spreadsheetId = configResponse.data.spreadsheetId;
+      if (spreadsheetId) {
+        const spreadsheetIdField = document.getElementById('spreadsheet-id');
+        if (spreadsheetIdField) {
+          spreadsheetIdField.value = spreadsheetId;
+        }
+        
+        // Update connection status
+        updateConnectionStatus(true);
+        appState.spreadsheetConfigured = true;
+      }
+    }
+    
+    // Load notification settings
+    const notificationResponse = await callServerFunction('getNotificationSettings');
+    if (notificationResponse.success) {
+      const notificationSettings = notificationResponse.data;
+      
+      // Load Google Chat webhook URL
+      const webhookUrlField = document.getElementById('google-chat-webhook-url');
+      if (webhookUrlField && notificationSettings.webhookUrl) {
+        webhookUrlField.value = notificationSettings.webhookUrl;
+      }
+      
+      // Load P95 monitoring settings
+      const p95MonitoringSwitch = document.getElementById('p95-monitoring');
+      if (p95MonitoringSwitch) {
+        p95MonitoringSwitch.checked = notificationSettings.p95MonitoringEnabled || false;
+        toggleP95Settings(notificationSettings.p95MonitoringEnabled);
+      }
+      
+      const p95AlertThreshold = document.getElementById('p95-alert-threshold');
+      if (p95AlertThreshold && notificationSettings.p95AlertThreshold) {
+        p95AlertThreshold.value = notificationSettings.p95AlertThreshold;
+      }
+      
+      const p95WarningThreshold = document.getElementById('p95-warning-threshold');
+      if (p95WarningThreshold && notificationSettings.p95WarningThreshold) {
+        p95WarningThreshold.value = notificationSettings.p95WarningThreshold;
+      }
+      
+      const dailyTriggerHour = document.getElementById('daily-trigger-hour');
+      if (dailyTriggerHour && notificationSettings.dailyTriggerHour !== undefined) {
+        dailyTriggerHour.value = notificationSettings.dailyTriggerHour;
+      }
+      
+      // Load other notification settings
+      const trtNotifications = document.getElementById('trt-notifications');
+      if (trtNotifications) {
+        trtNotifications.checked = notificationSettings.enabled !== false;
+      }
+      
+      const caseUpdates = document.getElementById('case-updates');
+      if (caseUpdates) {
+        caseUpdates.checked = notificationSettings.enableBatchAlerts !== false;
+      }
+      
+      const teamLeaderNotifications = document.getElementById('team-leader-notifications');
+      if (teamLeaderNotifications) {
+        teamLeaderNotifications.checked = notificationSettings.teamLeaderNotifications || false;
+      }
+      
+      const batchAlerts = document.getElementById('batch-alerts');
+      if (batchAlerts) {
+        batchAlerts.checked = notificationSettings.enableBatchAlerts !== false;
+      }
+    }
+    
+    // Load user preferences
+    if (appState.currentUser && appState.currentUser.settings) {
+      const settings = appState.currentUser.settings;
+      
+      // Theme setting
+      const themeSelect = document.getElementById('theme-select');
+      if (themeSelect && settings.theme) {
+        themeSelect.value = settings.theme;
+      }
+      
+      // Rows per page setting
+      const rowsSelect = document.getElementById('rows-per-page-setting');
+      if (rowsSelect && settings.rowsPerPage) {
+        rowsSelect.value = settings.rowsPerPage;
+      }
+    }
+    
+    // Setup P95 monitoring toggle listener
+    setupP95MonitoringToggle();
+    
+  } catch (error) {
+    console.error('Failed to load settings data:', error);
+  }
+}
+
+/**
+ * Test spreadsheet connection
+ */
+async function testSpreadsheetConnection() {
+  try {
+    const spreadsheetIdField = document.getElementById('spreadsheet-id');
+    if (!spreadsheetIdField || !spreadsheetIdField.value.trim()) {
+      showError('Please enter a spreadsheet ID first.');
+      return;
+    }
+    
+    const spreadsheetId = spreadsheetIdField.value.trim();
+    showLoading(true);
+    
+    // Validate spreadsheet and required sheets
+    const response = await callServerFunction('configureSpreadsheet', spreadsheetId);
+    
+    if (response.success) {
+      updateConnectionStatus(true);
+      showValidationResults(response);
+      showToast('Spreadsheet connection successful!', 'success');
+    } else {
+      updateConnectionStatus(false);
+      if (response.missingSheets) {
+        showValidationResults(response);
+      }
+      showError(response.message || 'Failed to connect to spreadsheet.');
+    }
+    
+  } catch (error) {
+    console.error('Failed to test spreadsheet connection:', error);
+    updateConnectionStatus(false);
+    showError('Failed to test spreadsheet connection.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+/**
+ * Configure spreadsheet
+ */
+async function configureSpreadsheet() {
+  try {
+    const spreadsheetIdField = document.getElementById('spreadsheet-id');
+    if (!spreadsheetIdField || !spreadsheetIdField.value.trim()) {
+      showError('Please enter a spreadsheet ID first.');
+      return;
+    }
+    
+    const spreadsheetId = spreadsheetIdField.value.trim();
+    showLoading(true);
+    
+    const response = await callServerFunction('configureSpreadsheet', spreadsheetId);
+    
+    if (response.success) {
+      appState.spreadsheetConfigured = true;
+      updateConnectionStatus(true);
+      showToast('Spreadsheet configured successfully!', 'success');
+      
+      // Reload sheet types
+      const sheetTypesResponse = await callServerFunction('getAvailableSheetTypes');
+      if (sheetTypesResponse.success) {
+        appState.sheetTypes = sheetTypesResponse.data;
+        populateSheetTypeSelects();
+      }
+    } else {
+      showError(response.message || 'Failed to configure spreadsheet.');
+    }
+    
+  } catch (error) {
+    console.error('Failed to configure spreadsheet:', error);
+    showError('Failed to configure spreadsheet.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+/**
+ * Update connection status display
+ */
+function updateConnectionStatus(isConnected) {
+  const statusElement = document.getElementById('connection-status');
+  if (!statusElement) return;
+  
+  const statusIndicator = statusElement.querySelector('.status-indicator');
+  const icon = statusIndicator.querySelector('.material-symbols-outlined');
+  
+  if (isConnected) {
+    statusIndicator.className = 'status-indicator connected';
+    icon.textContent = 'link';
+    statusIndicator.innerHTML = '<span class="material-symbols-outlined">link</span>Connected';
+  } else {
+    statusIndicator.className = 'status-indicator disconnected';
+    icon.textContent = 'link_off';
+    statusIndicator.innerHTML = '<span class="material-symbols-outlined">link_off</span>Not Connected';
+  }
+}
+
+/**
+ * Show validation results for spreadsheet sheets
+ */
+function showValidationResults(response) {
+  const validationDiv = document.getElementById('sheet-validation');
+  const resultsDiv = document.getElementById('validation-results');
+  
+  if (!validationDiv || !resultsDiv) return;
+  
+  if (response.success) {
+    resultsDiv.innerHTML = `
+      <div class="validation-success">
+        <span class="material-symbols-outlined">check_circle</span>
+        All required sheets found: ${response.availableSheets.join(', ')}
+      </div>
+    `;
+  } else if (response.missingSheets) {
+    resultsDiv.innerHTML = `
+      <div class="validation-error">
+        <span class="material-symbols-outlined">error</span>
+        Missing required sheets: ${response.missingSheets.join(', ')}
+      </div>
+      <div class="validation-info">
+        <span class="material-symbols-outlined">info</span>
+        Found sheets: ${response.existingSheets.join(', ')}
+      </div>
+    `;
+  }
+  
+  validationDiv.style.display = 'block';
+}
+
+/**
+ * Save settings
+ */
+async function saveSettings() {
+  try {
+    showLoading(true);
+    
+    // Save user preferences
+    const settings = {
+      theme: document.getElementById('theme-select')?.value || 'dark',
+      rowsPerPage: parseInt(document.getElementById('rows-per-page-setting')?.value || '25'),
+      trtNotifications: document.getElementById('trt-notifications')?.checked || true,
+      caseUpdates: document.getElementById('case-updates')?.checked || true
+    };
+    
+    // Save notification settings
+    const notificationSettings = {
+      enabled: document.getElementById('trt-notifications')?.checked !== false,
+      googleChatEnabled: !!document.getElementById('google-chat-webhook-url')?.value,
+      webhookUrl: document.getElementById('google-chat-webhook-url')?.value || '',
+      p95MonitoringEnabled: document.getElementById('p95-monitoring')?.checked || false,
+      p95AlertThreshold: parseFloat(document.getElementById('p95-alert-threshold')?.value || '2.0'),
+      p95WarningThreshold: parseFloat(document.getElementById('p95-warning-threshold')?.value || '0.9'),
+      dailyTriggerHour: parseInt(document.getElementById('daily-trigger-hour')?.value || '9'),
+      teamLeaderNotifications: document.getElementById('team-leader-notifications')?.checked || false,
+      enableBatchAlerts: document.getElementById('batch-alerts')?.checked !== false,
+      enableSummaryAlerts: true,
+      retryAttempts: 3,
+      retryDelay: 1000,
+      timeoutMs: 10000,
+      duplicatePreventionTime: 3600000, // 1 hour
+      escalationEnabled: document.getElementById('team-leader-notifications')?.checked || false
+    };
+    
+    // Save both user preferences and notification settings
+    const [userResponse, notificationResponse] = await Promise.all([
+      callServerFunction('updateUserSettings', settings),
+      callServerFunction('updateNotificationSettings', notificationSettings)
+    ]);
+    
+    if (userResponse.success && notificationResponse.success) {
+      // Apply theme change immediately
+      if (window.CasesDashThemeManager) {
+        window.CasesDashThemeManager.setTheme(settings.theme);
+      }
+      
+      // Update app state
+      if (appState.currentUser) {
+        appState.currentUser.settings = settings;
+      }
+      
+      showToast('Settings saved successfully!', 'success');
+      closeSettingsModal();
+    } else {
+      if (!userResponse.success) {
+        showError('Failed to save user preferences.');
+      }
+      if (!notificationResponse.success) {
+        showError('Failed to save notification settings.');
+      }
+    }
+    
+  } catch (error) {
+    console.error('Failed to save settings:', error);
+    showError('Failed to save settings.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+/**
+ * Close settings modal
+ */
+function closeSettingsModal() {
+  const modal = document.getElementById('settings-modal');
+  if (modal) {
+    modal.close();
+    modal.remove();
+  }
+}
+
+/**
+ * Enhanced logout with session cleanup
+ */
+function logout() {
+  try {
+    if (confirm('Are you sure you want to logout?')) {
+      // Clear app state
+      appState = {
+        initialized: false,
+        currentUser: null,
+        currentView: 'dashboard',
+        sheetTypes: [],
+        dashboardData: null,
+        liveModeWindow: null,
+        currentFormGenerator: null,
+        selectedSheetType: null,
+        formMode: 'create',
+        sentimentData: null,
+        sentimentConfig: null,
+        sentimentChart: null
+      };
+      
+      // Close live mode window if open
+      if (appState.liveModeWindow && !appState.liveModeWindow.closed) {
+        appState.liveModeWindow.close();
+      }
+      
+      // Redirect to fresh instance
+      window.location.reload();
+    }
+  } catch (error) {
+    console.error('Failed to logout:', error);
+    showError('Failed to logout properly.');
+  }
+}
+
+// ========================================
+// TRT(P95) MANAGEMENT & ANALYTICS FUNCTIONS
+// ========================================
+
+/**
+ * Show comprehensive reports with TRT(P95) analytics and sentiment integration
+ */
+function showReports(initialPeriod = 'monthly') {
+  try {
+    console.log('📊 Enhanced Reportsビューを表示中...');
+    switchView('reports');
+    initializeEnhancedReports(initialPeriod);
+  } catch (error) {
+    console.error('Failed to show reports:', error);
+    showError('Failed to load reports.');
+  }
+}
+
+/**
+ * Initialize enhanced reports with period selection and sentiment integration
+ */
+async function initializeEnhancedReports(initialPeriod = 'monthly') {
+  try {
+    showLoading(true, 'Enhanced reportsを初期化中...');
+
+    // Update the reports view with enhanced UI
+    const reportsView = document.getElementById('reports-view');
+    if (reportsView) {
+      reportsView.innerHTML = generateEnhancedReportsHTML(initialPeriod);
+    }
+
+    // Initialize period selector
+    setupPeriodSelector(initialPeriod);
+
+    // Initialize sentiment integration
+    await initializeSentimentIntegration();
+
+    // Load initial data
+    await loadEnhancedReportsData(initialPeriod);
+    
+  } catch (error) {
+    console.error('❌ Enhanced Reportsの初期化に失敗:', error);
+    showError('レポートの初期化に失敗しました。');
+  } finally {
+    showLoading(false);
+  }
+}
+
+/**
+ * Generate enhanced reports HTML with period selection and sentiment integration
+ */
+function generateEnhancedReportsHTML(initialPeriod) {
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth() + 1;
+
+  return `
+    <div class="dashboard-grid">
+      <div class="grid-col-12">
+        <div class="dashboard-card">
+          <div class="card-header">
+            <div>
+              <h3 class="card-title">Analytics & Reports Dashboard</h3>
+              <p class="card-subtitle">Comprehensive analytics with TRT(P95), Sentiment, and Statistical insights</p>
+            </div>
+            <div class="card-actions">
+              <button class="btn btn-secondary" onclick="refreshReportsData()">
+                <span class="material-symbols-outlined">refresh</span>
+                Refresh
+              </button>
+              <button class="btn btn-secondary" onclick="exportFullReport()">
+                <span class="material-symbols-outlined">download</span>
+                Export
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <!-- Period Selection Section -->
+            <div class="reports-period-section">
+              <h4>Analysis Period</h4>
+              <div class="period-selector-container">
+                <div class="form-grid">
+                  <div class="form-field">
+                    <label for="reports-period-type">Period Type</label>
+                    <select id="reports-period-type" class="period-type-select">
+                      <option value="monthly" ${initialPeriod === 'monthly' ? 'selected' : ''}>Monthly</option>
+                      <option value="quarterly" ${initialPeriod === 'quarterly' ? 'selected' : ''}>Quarterly</option>
+                      <option value="yearly" ${initialPeriod === 'yearly' ? 'selected' : ''}>Yearly</option>
+                      <option value="custom" ${initialPeriod === 'custom' ? 'selected' : ''}>Custom Range</option>
+                    </select>
+                  </div>
+                  <div class="form-field" id="reports-year-field">
+                    <label for="reports-year">Year</label>
+                    <select id="reports-year">
+                      ${Array.from({length: 5}, (_, i) => {
+                        const year = currentYear - i;
+                        return `<option value="${year}" ${year === currentYear ? 'selected' : ''}>${year}</option>`;
+                      }).join('')}
+                    </select>
+                  </div>
+                  <div class="form-field" id="reports-month-field" style="display: ${initialPeriod === 'monthly' ? 'block' : 'none'};">
+                    <label for="reports-month">Month</label>
+                    <select id="reports-month">
+                      ${Array.from({length: 12}, (_, i) => {
+                        const month = i + 1;
+                        const monthName = new Date(currentYear, i).toLocaleDateString('en-US', { month: 'long' });
+                        return `<option value="${month}" ${month === currentMonth ? 'selected' : ''}>${monthName}</option>`;
+                      }).join('')}
+                    </select>
+                  </div>
+                  <div class="form-field" id="reports-quarter-field" style="display: ${initialPeriod === 'quarterly' ? 'block' : 'none'};">
+                    <label for="reports-quarter">Quarter</label>
+                    <select id="reports-quarter">
+                      <option value="1" ${Math.ceil(currentMonth / 3) === 1 ? 'selected' : ''}>Q1 (Jan-Mar)</option>
+                      <option value="2" ${Math.ceil(currentMonth / 3) === 2 ? 'selected' : ''}>Q2 (Apr-Jun)</option>
+                      <option value="3" ${Math.ceil(currentMonth / 3) === 3 ? 'selected' : ''}>Q3 (Jul-Sep)</option>
+                      <option value="4" ${Math.ceil(currentMonth / 3) === 4 ? 'selected' : ''}>Q4 (Oct-Dec)</option>
+                    </select>
+                  </div>
+                  <div class="form-field" id="reports-custom-from-field" style="display: ${initialPeriod === 'custom' ? 'block' : 'none'};">
+                    <label for="reports-custom-from">From Date</label>
+                    <input type="date" id="reports-custom-from" class="date-input">
+                  </div>
+                  <div class="form-field" id="reports-custom-to-field" style="display: ${initialPeriod === 'custom' ? 'block' : 'none'};">
+                    <label for="reports-custom-to">To Date</label>
+                    <input type="date" id="reports-custom-to" class="date-input">
+                  </div>
+                </div>
+                <div class="period-actions">
+                  <button class="btn btn-primary" onclick="applyPeriodFilter()">
+                    <span class="material-symbols-outlined">filter_alt</span>
+                    Apply Filter
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sentiment Integration Section -->
+            <div class="reports-sentiment-section">
+              <h4>Sentiment Score Integration</h4>
+              <div id="sentiment-integration-container" class="sentiment-integration-container">
+                <div class="loading-skeleton" style="height: 120px;"></div>
+              </div>
+            </div>
+
+            <!-- TRT Analytics Section -->
+            <div class="reports-trt-section">
+              <h4>TRT(P95) Analytics</h4>
+              <div id="trt-analytics-container" class="trt-analytics-container">
+                <div class="loading-skeleton" style="height: 400px;"></div>
+              </div>
+            </div>
+
+            <!-- Statistics Charts Section -->
+            <div class="reports-statistics-section">
+              <h4>Statistical Analysis</h4>
+              <div id="statistics-charts-container" class="statistics-charts-container">
+                <div class="loading-skeleton" style="height: 500px;"></div>
+              </div>
+            </div>
+
+            <!-- Data Export Section -->
+            <div class="reports-export-section">
+              <h4>Export Options</h4>
+              <div class="export-options-grid">
+                <button class="btn btn-secondary" onclick="exportTRTReport()">
+                  <span class="material-symbols-outlined">analytics</span>
+                  Export TRT Report
+                </button>
+                <button class="btn btn-secondary" onclick="exportSentimentReport()">
+                  <span class="material-symbols-outlined">sentiment_satisfied</span>
+                  Export Sentiment Report
+                </button>
+                <button class="btn btn-secondary" onclick="exportStatisticsReport()">
+                  <span class="material-symbols-outlined">bar_chart</span>
+                  Export Statistics Report
+                </button>
+                <button class="btn btn-primary" onclick="exportCombinedReport()">
+                  <span class="material-symbols-outlined">summarize</span>
+                  Export Combined Report
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Load comprehensive reports data with enhanced integration
+ */
+async function loadEnhancedReportsData(periodType) {
+  try {
+    showLoading(true, 'Loading enhanced reports data...');
+
+    // Get period parameters
+    const periodParams = extractPeriodParameters(periodType);
+
+    // Load TRT analytics
+    const trtPromise = callServerFunction('getTRTAnalytics', periodParams);
+    
+    // Load statistics data with StatisticsManager integration
+    const statsPromise = loadStatisticsData(periodParams);
+    
+    // Load case statistics
+    const caseStatsPromise = callServerFunction('getCaseStatistics', periodParams);
+
+    // Load performance metrics based on user role
+    let performancePromise = Promise.resolve({ success: false });
+    if (appState.currentUser && ['admin', 'teamLeader'].includes(appState.currentUser.role)) {
+      performancePromise = callServerFunction('getPerformanceMetrics', periodParams);
+    }
+
+    // Wait for all data
+    const [trtResponse, statsData, caseStatsResponse, performanceResponse] = await Promise.all([
+      trtPromise, statsPromise, caseStatsPromise, performancePromise
+    ]);
+
+    // Update displays
+    if (trtResponse.success) {
+      updateTRTAnalyticsDisplay(trtResponse.data);
+    }
+
+    if (statsData) {
+      updateStatisticsChartsDisplay(statsData);
+    }
+
+    if (caseStatsResponse.success) {
+      renderCaseStatistics(caseStatsResponse.data);
+    }
+
+    if (performanceResponse.success) {
+      renderPerformanceMetrics(performanceResponse.data);
+    }
+
+  } catch (error) {
+    console.error('❌ Enhanced reports data loading failed:', error);
+    showError('Failed to load reports data.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+/**
+ * Load statistics data using StatisticsManager
+ */
+async function loadStatisticsData(periodParams) {
+  try {
+    if (window.CasesDashStatisticsManager) {
+      // Use StatisticsManager for enhanced analytics
+      return await window.CasesDashStatisticsManager.generatePeriodReport(periodParams);
+    } else {
+      // Fallback to basic statistics call
+      const response = await callServerFunction('getCaseStatistics', periodParams);
+      return response.success ? response.data : null;
+    }
+  } catch (error) {
+    console.error('Failed to load statistics data:', error);
+    return null;
+  }
+}
+
+/**
+ * Legacy load reports data function (kept for compatibility)
+ */
+async function loadReportsData() {
+  return await loadEnhancedReportsData('monthly');
+}
+
+/**
+ * Render TRT(P95) reports with exclusion criteria
+ */
+function renderTRTReports(trtData) {
+  const reportsContainer = document.getElementById('reports-container');
+  if (!reportsContainer) return;
+  
+  const trtSection = document.createElement('div');
+  trtSection.className = 'trt-reports-section';
+  
+  trtSection.innerHTML = `
+    <div class="reports-header">
+      <h3>
+        <span class="material-symbols-outlined">schedule</span>
+        TRT(P95) Analytics
+      </h3>
+      <div class="reports-actions">
+        <button class="btn btn-secondary" onclick="exportTRTReport()">
+          <span class="material-symbols-outlined">download</span>
+          Export Report
+        </button>
+        <button class="btn btn-primary" onclick="refreshTRTData()">
+          <span class="material-symbols-outlined">refresh</span>
+          Refresh
+        </button>
+      </div>
+    </div>
+    
+    <div class="trt-metrics-grid">
+      <div class="trt-metric-card">
+        <div class="metric-header">
+          <h4>Overall TRT(P95)</h4>
+          <span class="metric-trend ${trtData.trend > 0 ? 'up' : 'down'}">
+            <span class="material-symbols-outlined">${trtData.trend > 0 ? 'trending_up' : 'trending_down'}</span>
+            ${Math.abs(trtData.trend)}%
+          </span>
+        </div>
+        <div class="metric-value ${trtData.p95 > 2 ? 'violation' : 'good'}">
+          ${trtData.p95.toFixed(1)}h
+        </div>
+        <div class="metric-status">
+          SLA Target: 2.0h
+        </div>
+      </div>
+      
+      <div class="trt-metric-card">
+        <div class="metric-header">
+          <h4>Cases Under 2h Alert</h4>
+        </div>
+        <div class="metric-value ${trtData.under2h > 0 ? 'warning' : 'good'}">
+          ${trtData.under2h}
+        </div>
+        <div class="metric-status">
+          Requiring immediate attention
+        </div>
+      </div>
+      
+      <div class="trt-metric-card">
+        <div class="metric-header">
+          <h4>Excluded Cases</h4>
+        </div>
+        <div class="metric-value neutral">
+          ${trtData.excludedCount}
+        </div>
+        <div class="metric-status">
+          Bug/L2/IDT/T&S excluded
+        </div>
+      </div>
+    </div>
+    
+    <div class="trt-exclusion-criteria">
+      <h4>TRT(P95) Exclusion Criteria</h4>
+      <div class="exclusion-list">
+        <div class="exclusion-item">
+          <span class="material-symbols-outlined">bug_report</span>
+          <span>Bug Cases (Blocked by) - ALL segments</span>
+          <span class="count">${trtData.exclusions.bug || 0}</span>
+        </div>
+        <div class="exclusion-item">
+          <span class="material-symbols-outlined">support_agent</span>
+          <span>L2 Consulted Cases - ALL segments</span>
+          <span class="count">${trtData.exclusions.l2 || 0}</span>
+        </div>
+        <div class="exclusion-item">
+          <span class="material-symbols-outlined">payments</span>
+          <span>IDT/Payreq Blocked Cases - Billing segment</span>
+          <span class="count">${trtData.exclusions.billing || 0}</span>
+        </div>
+        <div class="exclusion-item">
+          <span class="material-symbols-outlined">policy</span>
+          <span>T&S Consulted Cases - Policy segment</span>
+          <span class="count">${trtData.exclusions.policy || 0}</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="trt-chart-container">
+      <canvas id="trt-trend-chart" width="800" height="400"></canvas>
+    </div>
+  `;
+  
+  reportsContainer.appendChild(trtSection);
+  
+  // Render TRT trend chart
+  renderTRTChart(trtData.trendData);
+}
+
+/**
+ * Render TRT trend chart using Chart.js
+ */
+function renderTRTChart(trendData) {
+  const ctx = document.getElementById('trt-trend-chart');
+  if (!ctx || !window.Chart) return;
+  
+  new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: trendData.labels,
+      datasets: [{
+        label: 'TRT(P95) Hours',
+        data: trendData.values,
+        borderColor: '#1976d2',
+        backgroundColor: 'rgba(25, 118, 210, 0.1)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.4
+      }, {
+        label: 'SLA Target (2h)',
+        data: Array(trendData.labels.length).fill(2),
+        borderColor: '#f44336',
+        borderWidth: 2,
+        borderDash: [5, 5],
+        fill: false,
+        pointRadius: 0
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'top'
+        },
+        title: {
+          display: true,
+          text: 'TRT(P95) Trend Analysis'
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: 'Hours'
+          }
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Google Chat notification system for TRT alerts
+ */
+async function setupTRTNotifications() {
+  try {
+    // This would be called periodically by server-side triggers
+    const response = await callServerFunction('checkTRTAlerts');
+    
+    if (response.success && response.data.alerts.length > 0) {
+      // Process TRT alerts
+      response.data.alerts.forEach(alert => {
+        sendTRTAlert(alert);
+      });
+    }
+    
+  } catch (error) {
+    console.error('Failed to setup TRT notifications:', error);
+  }
+}
+
+/**
+ * Send TRT alert to Google Chat
+ */
+async function sendTRTAlert(alertData) {
+  try {
+    const message = {
+      ldap: alertData.assignee,
+      caseId: alertData.caseId,
+      timeRemaining: alertData.timeRemaining,
+      segment: alertData.segment
+    };
+    
+    const response = await callServerFunction('sendGoogleChatAlert', message);
+    
+    if (response.success) {
+      console.log(`TRT alert sent for case ${alertData.caseId}`);
+    }
+    
+  } catch (error) {
+    console.error('Failed to send TRT alert:', error);
+  }
+}
+
+/**
+ * Case creation with TRT exclusion handling
+ */
+function setupCaseFormWithExclusions(sheetType) {
+  // This extends the existing setupCaseForm function
+  const formContainer = document.getElementById('form-container');
+  if (!formContainer) return;
+  
+  // Add TRT exclusion fields based on segment
+  const exclusionSection = document.createElement('div');
+  exclusionSection.className = 'trt-exclusion-section';
+  
+  let exclusionFields = '';
+  
+  // Common exclusions for all segments
+  exclusionFields += `
+    <div class="form-field-group">
+      <h5>TRT(P95) Exclusion Options</h5>
+      <div class="exclusion-field">
+        <label class="mdl-checkbox mdl-js-checkbox mdl-js-ripple-effect">
+          <input type="checkbox" id="bug-case" class="mdl-checkbox__input" name="exclusions">
+          <span class="mdl-checkbox__label">Bug Case (Blocked by) - Excludes from TRT</span>
+        </label>
+      </div>
+      <div class="exclusion-field">
+        <label class="mdl-checkbox mdl-js-checkbox mdl-js-ripple-effect">
+          <input type="checkbox" id="l2-consult" class="mdl-checkbox__input" name="exclusions">
+          <span class="mdl-checkbox__label">L2 Consulted - Excludes from TRT</span>
+        </label>
+      </div>
+  `;
+  
+  // Segment-specific exclusions
+  if (sheetType.includes('Billing')) {
+    exclusionFields += `
+      <div class="exclusion-field">
+        <label class="mdl-checkbox mdl-js-checkbox mdl-js-ripple-effect">
+          <input type="checkbox" id="idt-payreq" class="mdl-checkbox__input" name="exclusions">
+          <span class="mdl-checkbox__label">IDT/Payreq Blocked - Billing exclusion</span>
+        </label>
+      </div>
+    `;
+  }
+  
+  if (sheetType.includes('Policy')) {
+    exclusionFields += `
+      <div class="exclusion-field">
+        <label class="mdl-checkbox mdl-js-checkbox mdl-js-ripple-effect">
+          <input type="checkbox" id="ts-consult" class="mdl-checkbox__input" name="exclusions">
+          <span class="mdl-checkbox__label">T&S Consulted - Policy exclusion</span>
+        </label>
+      </div>
+    `;
+  }
+  
+  exclusionFields += '</div>';
+  exclusionSection.innerHTML = exclusionFields;
+  
+  // Insert before form buttons
+  const formButtons = formContainer.querySelector('.form-buttons');
+  if (formButtons) {
+    formContainer.insertBefore(exclusionSection, formButtons);
+  } else {
+    formContainer.appendChild(exclusionSection);
+  }
+  
+  // Initialize MDL components
+  if (typeof componentHandler !== 'undefined') {
+    componentHandler.upgradeElements(exclusionSection);
+  }
+}
+
+/**
+ * Team management functions
+ */
+function showTeamManagement() {
+  try {
+    if (!appState.currentUser || !['admin', 'teamLeader'].includes(appState.currentUser.role)) {
+      showError('Access denied: Team management requires admin or team leader privileges.');
+      return;
+    }
+    
+    const teamModal = createTeamManagementModal();
+    document.body.appendChild(teamModal);
+    teamModal.showModal();
+    
+    loadTeamData();
+    
+  } catch (error) {
+    console.error('Failed to show team management:', error);
+    showError('Failed to load team management.');
+  }
+}
+
+/**
+ * Create team management modal
+ */
+function createTeamManagementModal() {
+  const modal = document.createElement('dialog');
+  modal.className = 'mdl-dialog casesdash-modal team-modal';
+  modal.id = 'team-management-modal';
+  
+  modal.innerHTML = `
+    <div class="mdl-dialog__content">
+      <h4 class="mdl-dialog__title">
+        <span class="material-symbols-outlined">groups</span>
+        Team Management
+      </h4>
+      
+      <div class="team-tabs">
+        <div class="tab-buttons">
+          <button class="tab-button active" data-tab="overview">Overview</button>
+          <button class="tab-button" data-tab="performance">Performance</button>
+          <button class="tab-button" data-tab="workload">Workload</button>
+        </div>
+        
+        <div class="tab-content active" id="overview-tab">
+          <div id="team-overview-content">
+            Loading team data...
+          </div>
+        </div>
+        
+        <div class="tab-content" id="performance-tab">
+          <div id="team-performance-content">
+            Loading performance data...
+          </div>
+        </div>
+        
+        <div class="tab-content" id="workload-tab">
+          <div id="team-workload-content">
+            Loading workload data...
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="mdl-dialog__actions">
+      <button type="button" class="mdl-button" onclick="closeTeamManagementModal()">
+        Close
+      </button>
+    </div>
+  `;
+  
+  // Setup team tabs
+  setTimeout(() => setupTeamTabs(), 100);
+  
+  return modal;
+}
+
+/**
+ * Setup team management tabs
+ */
+function setupTeamTabs() {
+  const tabButtons = document.querySelectorAll('#team-management-modal .tab-button');
+  const tabContents = document.querySelectorAll('#team-management-modal .tab-content');
+  
+  tabButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      const targetTab = button.getAttribute('data-tab');
+      
+      tabButtons.forEach(btn => btn.classList.remove('active'));
+      button.classList.add('active');
+      
+      tabContents.forEach(content => {
+        content.classList.remove('active');
+        if (content.id === `${targetTab}-tab`) {
+          content.classList.add('active');
+        }
+      });
+    });
+  });
+}
+
+/**
+ * Load team data
+ */
+async function loadTeamData() {
+  try {
+    const response = await callServerFunction('getTeamData');
+    if (response.success) {
+      renderTeamOverview(response.data.overview);
+      renderTeamPerformance(response.data.performance);
+      renderTeamWorkload(response.data.workload);
+    }
+  } catch (error) {
+    console.error('Failed to load team data:', error);
+  }
+}
+
+/**
+ * Render team overview
+ */
+function renderTeamOverview(overviewData) {
+  const container = document.getElementById('team-overview-content');
+  if (!container) return;
+  
+  container.innerHTML = `
+    <div class="team-stats-grid">
+      <div class="team-stat-card">
+        <h5>Total Team Members</h5>
+        <div class="stat-value">${overviewData.totalMembers}</div>
+      </div>
+      <div class="team-stat-card">
+        <h5>Active Cases</h5>
+        <div class="stat-value">${overviewData.activeCases}</div>
+      </div>
+      <div class="team-stat-card">
+        <h5>Team TRT(P95)</h5>
+        <div class="stat-value ${overviewData.teamTRT > 2 ? 'violation' : 'good'}">
+          ${overviewData.teamTRT.toFixed(1)}h
+        </div>
+      </div>
+    </div>
+    
+    <div class="team-members-list">
+      <h5>Team Members</h5>
+      ${overviewData.members.map(member => `
+        <div class="member-item">
+          <div class="member-info">
+            <span class="member-name">${escapeHtml(member.name)}</span>
+            <span class="member-email">${escapeHtml(member.email)}</span>
+          </div>
+          <div class="member-stats">
+            <span class="case-count">${member.activeCases} cases</span>
+            <span class="trt-score ${member.trt > 2 ? 'violation' : 'good'}">
+              TRT: ${member.trt.toFixed(1)}h
+            </span>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+/**
+ * Show audit logs
+ */
+function showAuditLogs() {
+  try {
+    if (!appState.currentUser || !['admin', 'teamLeader'].includes(appState.currentUser.role)) {
+      showError('Access denied: Audit logs require admin or team leader privileges.');
+      return;
+    }
+    
+    const auditModal = createAuditLogsModal();
+    document.body.appendChild(auditModal);
+    auditModal.showModal();
+    
+    loadAuditLogs();
+    
+  } catch (error) {
+    console.error('Failed to show audit logs:', error);
+    showError('Failed to load audit logs.');
+  }
+}
+
+/**
+ * Create audit logs modal
+ */
+function createAuditLogsModal() {
+  const modal = document.createElement('dialog');
+  modal.className = 'mdl-dialog casesdash-modal audit-modal';
+  modal.id = 'audit-logs-modal';
+  
+  modal.innerHTML = `
+    <div class="mdl-dialog__content">
+      <h4 class="mdl-dialog__title">
+        <span class="material-symbols-outlined">history</span>
+        Audit Logs
+      </h4>
+      
+      <div class="audit-filters">
+        <div class="filter-row">
+          <select id="audit-action-filter" class="mdl-textfield__input">
+            <option value="">All Actions</option>
+            <option value="create">Create</option>
+            <option value="update">Update</option>
+            <option value="delete">Delete</option>
+            <option value="login">Login</option>
+          </select>
+          
+          <input type="date" id="audit-date-filter" class="mdl-textfield__input">
+          
+          <button class="mdl-button mdl-button--raised" onclick="filterAuditLogs()">
+            Filter
+          </button>
+        </div>
+      </div>
+      
+      <div id="audit-logs-content">
+        Loading audit logs...
+      </div>
+    </div>
+    
+    <div class="mdl-dialog__actions">
+      <button type="button" class="mdl-button" onclick="closeAuditLogsModal()">
+        Close
+      </button>
+    </div>
+  `;
+  
+  return modal;
+}
+
+/**
+ * Show system configuration
+ */
+function showSystemConfig() {
+  try {
+    if (!appState.currentUser || appState.currentUser.role !== 'admin') {
+      showError('Access denied: System configuration requires admin privileges.');
+      return;
+    }
+    
+    const configModal = createSystemConfigModal();
+    document.body.appendChild(configModal);
+    configModal.showModal();
+    
+    loadSystemConfig();
+    
+  } catch (error) {
+    console.error('Failed to show system config:', error);
+    showError('Failed to load system configuration.');
+  }
+}
+
+/**
+ * Close modal functions
+ */
+function closeTeamManagementModal() {
+  const modal = document.getElementById('team-management-modal');
+  if (modal) {
+    modal.close();
+    modal.remove();
+  }
+}
+
+function closeAuditLogsModal() {
+  const modal = document.getElementById('audit-logs-modal');
+  if (modal) {
+    modal.close();
+    modal.remove();
+  }
+}
+
+/**
+ * Refresh TRT data
+ */
+async function refreshTRTData() {
+  try {
+    showLoading(true);
+    await loadReportsData();
+    showToast('TRT data refreshed successfully', 'success');
+  } catch (error) {
+    console.error('Failed to refresh TRT data:', error);
+    showError('Failed to refresh TRT data.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+/**
+ * Export TRT report
+ */
+async function exportTRTReport() {
+  try {
+    showLoading(true);
+    const response = await callServerFunction('exportTRTReport');
+    
+    if (response.success) {
+      // Handle export result
+      showToast('TRT report exported successfully', 'success');
+    } else {
+      showError('Failed to export TRT report.');
+    }
+  } catch (error) {
+    console.error('Failed to export TRT report:', error);
+    showError('Failed to export TRT report.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+function submitCaseForm() {
+  try {
+    if (window.CasesDashApp && appState.currentFormGenerator) {
+      // The FormGenerator handles form submission internally
+      console.log('Form submission handled by FormGenerator');
+    } else {
+      console.warn('FormGenerator not available for form submission');
+      showError('Form not properly initialized. Please refresh and try again.');
+    }
+  } catch (error) {
+    console.error('Error in submitCaseForm:', error);
+    showError('Failed to submit form. Please try again.');
+  }
+}
+
+function cancelCaseForm() {
+  window.CasesDashApp.showDashboard();
+}
+
+function performAdvancedSearch() {
+  console.log('Advanced search - not implemented yet');
+}
+
+function editCase(caseId, sheetType) {
+  try {
+    if (!caseId || !sheetType) {
+      showError('Invalid case information for editing.');
+      return;
+    }
+    
+    // Load case data and setup form for editing
+    window.CasesDashApp.loadCaseForEditing(caseId, sheetType);
+    
+  } catch (error) {
+    console.error('Error in editCase:', error);
+    showError('Failed to open case for editing.');
+  }
+}
+
+/**
+ * Setup period selector functionality
+ */
+function setupPeriodSelector(initialPeriod) {
+  const periodTypeSelect = document.getElementById('reports-period-type');
+  if (!periodTypeSelect) return;
+
+  periodTypeSelect.addEventListener('change', function() {
+    const selectedType = this.value;
+    togglePeriodFields(selectedType);
+  });
+
+  // Initialize field visibility
+  togglePeriodFields(initialPeriod);
+}
+
+/**
+ * Toggle period fields based on selected type
+ */
+function togglePeriodFields(periodType) {
+  const fields = {
+    month: document.getElementById('reports-month-field'),
+    quarter: document.getElementById('reports-quarter-field'),
+    customFrom: document.getElementById('reports-custom-from-field'),
+    customTo: document.getElementById('reports-custom-to-field')
+  };
+
+  // Hide all optional fields
+  Object.values(fields).forEach(field => {
+    if (field) field.style.display = 'none';
+  });
+
+  // Show relevant fields based on period type
+  switch (periodType) {
+    case 'monthly':
+      if (fields.month) fields.month.style.display = 'block';
+      break;
+    case 'quarterly':
+      if (fields.quarter) fields.quarter.style.display = 'block';
+      break;
+    case 'custom':
+      if (fields.customFrom) fields.customFrom.style.display = 'block';
+      if (fields.customTo) fields.customTo.style.display = 'block';
+      break;
+  }
+}
+
+/**
+ * Initialize sentiment integration in reports
+ */
+async function initializeSentimentIntegration() {
+  try {
+    const container = document.getElementById('sentiment-integration-container');
+    if (!container) return;
+
+    // Load current sentiment data using SentimentManager
+    if (window.CasesDashSentimentManager) {
+      const sentimentData = await window.CasesDashSentimentManager.getCurrentPeriodData();
+      updateSentimentIntegrationDisplay(sentimentData);
+    } else {
+      // Fallback to server call
+      const response = await callServerFunction('getCurrentSentimentData');
+      if (response.success) {
+        updateSentimentIntegrationDisplay(response.data);
+      } else {
+        throw new Error(response.error || 'Sentiment data load failed');
+      }
+    }
+  } catch (error) {
+    console.error('❌ Sentiment integration initialization failed:', error);
+    const container = document.getElementById('sentiment-integration-container');
+    if (container) {
+      container.innerHTML = '<div class="error-message">Sentiment data could not be loaded.</div>';
+    }
+  }
+}
+
+/**
+ * Update sentiment integration display
+ */
+function updateSentimentIntegrationDisplay(sentimentData) {
+  const container = document.getElementById('sentiment-integration-container');
+  if (!container) return;
+
+  const sentimentHTML = `
+    <div class="sentiment-integration-panel">
+      <div class="sentiment-current-card">
+        <div class="sentiment-score-display">
+          <div class="score-large">${sentimentData.currentScore || '--'}</div>
+          <div class="score-label">/10</div>
+        </div>
+        <div class="sentiment-info">
+          <div class="sentiment-period">${sentimentData.periodText || 'Current Period'}</div>
+          <div class="sentiment-status">${sentimentData.statusText || 'No data available'}</div>
+        </div>
+        <div class="sentiment-actions">
+          <button class="btn btn-secondary btn-sm" onclick="showSentimentModal()">
+            <span class="material-symbols-outlined">edit</span>
+            Edit Score
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="showSentimentHistory()">
+            <span class="material-symbols-outlined">history</span>
+            View History
+          </button>
+        </div>
+      </div>
+      <div class="sentiment-trend-mini">
+        <div class="trend-title">3-Month Trend</div>
+        <div class="trend-chart-mini" id="sentiment-mini-chart">
+          ${generateSentimentMiniChart(sentimentData.recentHistory || [])}
+        </div>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = sentimentHTML;
+}
+
+/**
+ * Generate mini sentiment chart
+ */
+function generateSentimentMiniChart(historyData) {
+  if (!historyData.length) {
+    return '<div class="no-data">No historical data available</div>';
+  }
+
+  const maxScore = 10;
+  const chartBars = historyData.slice(-3).map(item => {
+    const height = (item.score / maxScore) * 100;
+    return `
+      <div class="mini-chart-bar" style="height: ${height}%" title="${item.period}: ${item.score}/10">
+        <div class="bar-value">${item.score}</div>
+        <div class="bar-label">${item.period}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `<div class="mini-chart-container">${chartBars}</div>`;
+}
+
+/**
+ * Extract period parameters from UI
+ */
+function extractPeriodParameters(defaultType = 'monthly') {
+  const periodType = document.getElementById('reports-period-type')?.value || defaultType;
+  const year = parseInt(document.getElementById('reports-year')?.value) || new Date().getFullYear();
+  const month = parseInt(document.getElementById('reports-month')?.value) || new Date().getMonth() + 1;
+  const quarter = parseInt(document.getElementById('reports-quarter')?.value) || Math.ceil((new Date().getMonth() + 1) / 3);
+  const customFrom = document.getElementById('reports-custom-from')?.value;
+  const customTo = document.getElementById('reports-custom-to')?.value;
+
+  const params = {
+    periodType,
+    year
+  };
+
+  switch (periodType) {
+    case 'monthly':
+      params.month = month;
+      break;
+    case 'quarterly':
+      params.quarter = quarter;
+      break;
+    case 'custom':
+      if (customFrom && customTo) {
+        params.startDate = customFrom;
+        params.endDate = customTo;
+      }
+      break;
+  }
+
+  return params;
+}
+
+/**
+ * Update TRT analytics display
+ */
+function updateTRTAnalyticsDisplay(data) {
+  const container = document.getElementById('trt-analytics-container');
+  if (!container || !data) return;
+
+  const trtHTML = `
+    <div class="trt-analytics-panel">
+      <!-- TRT Overview Metrics -->
+      <div class="trt-metrics-grid">
+        <div class="trt-metric-card">
+          <div class="metric-header">
+            <span class="material-symbols-outlined">timer</span>
+            <h5>Current TRT(P95)</h5>
+          </div>
+          <div class="metric-value">${data.currentTRT || '--'}</div>
+          <div class="metric-target">Target: 2.0h</div>
+          <div class="metric-status ${data.slaStatus === 'compliant' ? 'compliant' : 'violation'}">
+            ${data.slaStatus === 'compliant' ? 'SLA Compliant' : 'SLA Violation'}
+          </div>
+        </div>
+        
+        <div class="trt-metric-card">
+          <div class="metric-header">
+            <span class="material-symbols-outlined">trending_up</span>
+            <h5>Trend</h5>
+          </div>
+          <div class="metric-value">${data.trend || '--'}</div>
+          <div class="metric-change ${data.trendDirection === 'up' ? 'negative' : 'positive'}">
+            <span class="material-symbols-outlined">${data.trendDirection === 'up' ? 'trending_up' : 'trending_down'}</span>
+            <span>${data.trendChange || '--'}%</span>
+          </div>
+        </div>
+        
+        <div class="trt-metric-card">
+          <div class="metric-header">
+            <span class="material-symbols-outlined">warning</span>
+            <h5>Under 2h Alert</h5>
+          </div>
+          <div class="metric-value">${data.under2hCount || 0}</div>
+          <div class="metric-detail">cases requiring attention</div>
+        </div>
+        
+        <div class="trt-metric-card">
+          <div class="metric-header">
+            <span class="material-symbols-outlined">filter_alt</span>
+            <h5>Excluded Cases</h5>
+          </div>
+          <div class="metric-value">${data.excludedCount || 0}</div>
+          <div class="metric-detail">from TRT calculation</div>
+        </div>
+      </div>
+
+      <!-- TRT Trend Chart -->
+      <div class="trt-chart-section">
+        <div class="chart-header">
+          <h5>TRT Trend (${data.chartPeriod || '30 days'})</h5>
+        </div>
+        <div class="chart-container">
+          <canvas id="trt-trend-chart-reports"></canvas>
+        </div>
+      </div>
+
+      <!-- Exclusion Breakdown -->
+      <div class="trt-exclusions-section">
+        <h5>Exclusion Criteria Breakdown</h5>
+        <div class="exclusions-grid">
+          ${(data.exclusions || []).map(exclusion => `
+            <div class="exclusion-item">
+              <div class="exclusion-label">${exclusion.label}</div>
+              <div class="exclusion-count">${exclusion.count}</div>
+              <div class="exclusion-scope">${exclusion.scope}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = trtHTML;
+
+  // Initialize TRT trend chart if Chart.js is available
+  if (typeof Chart !== 'undefined' && data.chartData) {
+    setTimeout(() => initializeTRTTrendChart(data.chartData), 100);
+  }
+}
+
+/**
+ * Update statistics charts display
+ */
+function updateStatisticsChartsDisplay(data) {
+  const container = document.getElementById('statistics-charts-container');
+  if (!container || !data) return;
+
+  const statsHTML = `
+    <div class="statistics-charts-panel">
+      <div class="stats-charts-grid">
+        <div class="chart-container">
+          <div class="chart-title">Case Volume Trend</div>
+          <canvas id="volume-chart-reports"></canvas>
+        </div>
+        <div class="chart-container">
+          <div class="chart-title">Performance Metrics</div>
+          <canvas id="performance-chart-reports"></canvas>
+        </div>
+        <div class="chart-container">
+          <div class="chart-title">Case Distribution</div>
+          <canvas id="distribution-chart-reports"></canvas>
+        </div>
+        <div class="chart-container">
+          <div class="chart-title">Period Comparison</div>
+          <canvas id="comparison-chart-reports"></canvas>
+        </div>
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = statsHTML;
+
+  // Initialize charts if Chart.js is available and data exists
+  if (typeof Chart !== 'undefined' && data.charts) {
+    setTimeout(() => {
+      if (data.charts.volume) initializeVolumeChart(data.charts.volume);
+      if (data.charts.performance) initializePerformanceChart(data.charts.performance);
+      if (data.charts.distribution) initializeDistributionChart(data.charts.distribution);
+      if (data.charts.comparison) initializeComparisonChart(data.charts.comparison);
+    }, 100);
+  }
+}
+
+/**
+ * Apply period filter
+ */
+async function applyPeriodFilter() {
+  try {
+    const periodParams = extractPeriodParameters();
+    console.log('📅 Applying period filter:', periodParams);
+    
+    showLoading(true, 'Applying period filter...');
+    await loadEnhancedReportsData(periodParams.periodType);
+    
+    showToast('Period filter applied successfully', 'success');
+  } catch (error) {
+    console.error('❌ Failed to apply period filter:', error);
+    showError('Failed to apply period filter.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+/**
+ * Refresh reports data
+ */
+async function refreshReportsData() {
+  try {
+    console.log('🔄 Refreshing reports data...');
+    showLoading(true, 'Refreshing reports data...');
+    
+    const currentPeriodType = document.getElementById('reports-period-type')?.value || 'monthly';
+    await loadEnhancedReportsData(currentPeriodType);
+    
+    showToast('Reports data refreshed successfully', 'success');
+  } catch (error) {
+    console.error('❌ Failed to refresh reports data:', error);
+    showError('Failed to refresh reports data.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function exportSentimentReport() {
+  try {
+    showLoading(true, 'Exporting sentiment report...');
+    const periodParams = extractPeriodParameters();
+    
+    const response = await callServerFunction('exportSentimentReport', periodParams);
+    if (response.success) {
+      showToast('Sentiment report exported successfully', 'success');
+    } else {
+      showError('Failed to export sentiment report.');
+    }
+  } catch (error) {
+    console.error('❌ Failed to export sentiment report:', error);
+    showError('Failed to export sentiment report.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function exportStatisticsReport() {
+  try {
+    showLoading(true, 'Exporting statistics report...');
+    const periodParams = extractPeriodParameters();
+    
+    const response = await callServerFunction('exportStatisticsReport', periodParams);
+    if (response.success) {
+      showToast('Statistics report exported successfully', 'success');
+    } else {
+      showError('Failed to export statistics report.');
+    }
+  } catch (error) {
+    console.error('❌ Failed to export statistics report:', error);
+    showError('Failed to export statistics report.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function exportCombinedReport() {
+  try {
+    showLoading(true, 'Exporting combined report...');
+    const periodParams = extractPeriodParameters();
+    
+    const response = await callServerFunction('exportCombinedReport', periodParams);
+    if (response.success) {
+      showToast('Combined report exported successfully', 'success');
+    } else {
+      showError('Failed to export combined report.');
+    }
+  } catch (error) {
+    console.error('❌ Failed to export combined report:', error);
+    showError('Failed to export combined report.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function exportFullReport() {
+  return await exportCombinedReport();
+}
+
+/**
+ * Chart initialization functions
+ */
+function initializeTRTTrendChart(chartData) {
+  const ctx = document.getElementById('trt-trend-chart-reports');
+  if (!ctx || !Chart) return;
+
+  new Chart(ctx, {
+    type: 'line',
+    data: chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: {
+          display: true,
+          text: 'TRT(P95) Trend Analysis'
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          title: {
+            display: true,
+            text: 'Hours'
+          }
+        }
+      }
+    }
+  });
+}
+
+function initializeVolumeChart(chartData) {
+  const ctx = document.getElementById('volume-chart-reports');
+  if (!ctx || !Chart) return;
+
+  new Chart(ctx, {
+    type: 'bar',
+    data: chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: {
+          display: true,
+          text: 'Case Volume Analysis'
+        }
+      }
+    }
+  });
+}
+
+function initializePerformanceChart(chartData) {
+  const ctx = document.getElementById('performance-chart-reports');
+  if (!ctx || !Chart) return;
+
+  new Chart(ctx, {
+    type: 'radar',
+    data: chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: {
+          display: true,
+          text: 'Performance Metrics'
+        }
+      }
+    }
+  });
+}
+
+function initializeDistributionChart(chartData) {
+  const ctx = document.getElementById('distribution-chart-reports');
+  if (!ctx || !Chart) return;
+
+  new Chart(ctx, {
+    type: 'doughnut',
+    data: chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: {
+          display: true,
+          text: 'Case Distribution'
+        }
+      }
+    }
+  });
+}
+
+function initializeComparisonChart(chartData) {
+  const ctx = document.getElementById('comparison-chart-reports');
+  if (!ctx || !Chart) return;
+
+  new Chart(ctx, {
+    type: 'line',
+    data: chartData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: {
+          display: true,
+          text: 'Period Comparison'
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Show sentiment modal and history functions (delegates to SentimentManager)
+ */
+function showSentimentModal() {
+  if (window.CasesDashSentimentManager) {
+    window.CasesDashSentimentManager.showSentimentModal();
+  } else {
+    console.warn('SentimentManager not available');
+    showError('Sentiment management is not available.');
+  }
+}
+
+function showSentimentHistory() {
+  if (window.CasesDashSentimentManager) {
+    window.CasesDashSentimentManager.showSentimentHistory();
+  } else {
+    console.warn('SentimentManager not available');
+    showError('Sentiment history is not available.');
+  }
+}
+
+/**
+ * Initialize the CasesDash application when DOM is ready
+ */
+document.addEventListener('DOMContentLoaded', async function() {
+  if (window.CasesDashApp && typeof window.CasesDashApp.initialize === 'function') {
+    try {
+      await window.CasesDashApp.initialize();
+    } catch (error) {
+      console.error('アプリケーション初期化エラー:', error);
+    }
+  }
+});
+
+/**
+ * Setup P95 monitoring toggle functionality
+ */
+function setupP95MonitoringToggle() {
+  const p95MonitoringSwitch = document.getElementById('p95-monitoring');
+  if (p95MonitoringSwitch) {
+    p95MonitoringSwitch.addEventListener('change', function() {
+      toggleP95Settings(this.checked);
+    });
+  }
+}
+
+/**
+ * Toggle P95 settings panel visibility
+ */
+function toggleP95Settings(enabled) {
+  const settingsPanel = document.getElementById('p95-settings-panel');
+  if (settingsPanel) {
+    settingsPanel.style.display = enabled ? 'block' : 'none';
+  }
+}
+
+/**
+ * Test Google Chat webhook connection
+ */
+async function testWebhookConnection() {
+  try {
+    const webhookUrl = document.getElementById('google-chat-webhook-url')?.value;
+    
+    if (!webhookUrl || !webhookUrl.trim()) {
+      showError('Please enter a webhook URL first.');
+      return;
+    }
+    
+    // Validate webhook URL format
+    if (!webhookUrl.startsWith('https://chat.googleapis.com/v1/spaces/')) {
+      showError('Please enter a valid Google Chat webhook URL.');
+      return;
+    }
+    
+    showLoading(true, 'Testing webhook connection...');
+    
+    const testMessage = {
+      text: `🧪 *CasesDash Test Message*\n\nThis is a test message from CasesDash to verify the Google Chat webhook connection.\n\n✅ If you can see this message, the webhook is working correctly!\n\n_Sent at: ${new Date().toLocaleString()}_`
+    };
+    
+    const response = await callServerFunction('testGoogleChatWebhook', webhookUrl, testMessage);
+    
+    if (response.success) {
+      showToast('✅ Webhook connection test successful! Check your Google Chat space.', 'success');
+    } else {
+      showError(`❌ Webhook test failed: ${response.error || 'Unknown error'}`);
+    }
+    
+  } catch (error) {
+    console.error('Failed to test webhook connection:', error);
+    showError('Failed to test webhook connection. Please check the URL and try again.');
+  } finally {
+    showLoading(false);
+  }
+}
+
+/**
+ * Global functions for notification settings
+ */
+window.testWebhookConnection = testWebhookConnection;
+window.toggleP95Settings = toggleP95Settings;
+window.setupP95MonitoringToggle = setupP95MonitoringToggle;
+
+// Also expose as AppMain for consistency with other modules
+window.AppMain = window.CasesDashApp;
+
+} // End of window check
+</script>

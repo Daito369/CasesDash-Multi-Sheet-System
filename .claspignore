@@ -1,0 +1,33 @@
+# Google Apps Scriptプロジェクトで管理しないファイル・フォルダを指定
+
+# 開発関連ファイル
+.git/
+node_modules/
+*.log
+.DS_Store
+*.tmp
+.roomodes
+
+# ドキュメントファイル（GASでは不要）
+README.md
+README-FINAL.md
+casesdash-roadmap.md
+casesdash-specification.md
+Main_Menu_Fix.md
+CODE_OPTIMIZATION_REPORT.md
+MIGRATION_GUIDE.md
+DEPLOYMENT_STRATEGY.md
+
+# テストファイル
+**/test/**
+**/*.test.js
+
+# エディタ設定ファイル
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# claspの設定ファイル（既にローカルに存在）
+.clasp.json
+.claspignore

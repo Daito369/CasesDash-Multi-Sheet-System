@@ -1,0 +1,693 @@
+<script>
+/**
+ * ===================================================================
+ * CasesDash Theme Manager - Material Design 3.0 Theme System
+ * ダークモード・ライトモード切り替え、テーマ設定管理
+ * ===================================================================
+ */
+
+/**
+ * @fileoverview Material Design 3.0準拠のテーマ管理システム
+ * @version 2.0.0
+ * @author CasesDash Development Team
+ */
+
+'use strict';
+
+/**
+ * 環境検出 - ブラウザ環境でのみ実行
+ * サーバーサイド（GAS）環境では安全にスキップ
+ */
+(function() {
+    // 環境チェック
+    if (typeof window === 'undefined') {
+        // サーバーサイド（GAS）環境では何もしない
+        console.log('🎨 ThemeManager: Skipping initialization in server environment');
+        return;
+    }
+
+    /**
+     * CasesDash Theme Manager
+     * テーマの切り替え、保存、復元を管理
+     */
+    window.CasesDashThemeManager = (function() {
+    
+    // === Constants ===
+    const THEME_STORAGE_KEY = 'casesdash_theme_preference';
+    const THEME_ATTRIBUTE = 'data-theme';
+    const THEMES = {
+        LIGHT: 'light',
+        DARK: 'dark',
+        AUTO: 'auto'
+    };
+    
+    // === State ===
+    let currentTheme = THEMES.DARK; // デフォルトをダークモードに設定
+    let mediaQueryList = null;
+    let themeToggleButtons = [];
+    let themeChangeCallbacks = [];
+    
+    /**
+     * テーママネージャーを初期化
+     * @public
+     */
+    function initialize() {
+        try {
+            console.log('🎨 Initializing CasesDash Theme Manager...');
+            
+            // メディアクエリの設定
+            setupMediaQuery();
+            
+            // 保存されたテーマ設定を読み込み
+            loadSavedTheme();
+            
+            // テーマ切り替えボタンを設定
+            setupThemeToggleButtons();
+            
+            // 初期テーマを適用
+            applyCurrentTheme();
+            
+            // テーマ変更時のカスタムイベントをリッスン
+            setupCustomEventListeners();
+            
+            console.log('✅ Theme Manager initialized successfully');
+            
+        } catch (error) {
+            console.error('❌ Failed to initialize Theme Manager:', error);
+            // フォールバックとしてダークテーマを適用
+            setTheme(THEMES.DARK);
+        }
+    }
+    
+    /**
+     * プリファードカラースキームのメディアクエリを設定
+     * @private
+     */
+    function setupMediaQuery() {
+        // 安全な環境チェック
+        if (typeof window !== 'undefined' && window.matchMedia) {
+            mediaQueryList = window.matchMedia('(prefers-color-scheme: dark)');
+            
+            // メディアクエリの変更をリッスン
+            if (mediaQueryList.addEventListener) {
+                mediaQueryList.addEventListener('change', handleSystemThemeChange);
+            } else if (mediaQueryList.addListener) {
+                // Safari対応
+                mediaQueryList.addListener(handleSystemThemeChange);
+            }
+        }
+    }
+    
+    /**
+     * システムテーマ変更時のハンドラー
+     * @private
+     * @param {MediaQueryListEvent} event - メディアクエリイベント
+     */
+    function handleSystemThemeChange(event) {
+        if (currentTheme === THEMES.AUTO) {
+            console.log('🔄 System theme changed to:', event.matches ? 'dark' : 'light');
+            applyCurrentTheme();
+            notifyThemeChange();
+        }
+    }
+    
+    /**
+     * 保存されたテーマ設定を読み込み
+     * @private
+     */
+    function loadSavedTheme() {
+        try {
+            // HTMLの初期テーマ設定を確認
+            let htmlTheme = THEMES.DARK; // デフォルトをダークモードに固定
+            if (typeof document !== 'undefined' && document.documentElement) {
+                const htmlThemeAttr = document.documentElement.getAttribute(THEME_ATTRIBUTE);
+                if (htmlThemeAttr && Object.values(THEMES).includes(htmlThemeAttr)) {
+                    htmlTheme = htmlThemeAttr;
+                } else {
+                    // HTMLに属性がない場合、ダークモードを強制設定
+                    document.documentElement.setAttribute(THEME_ATTRIBUTE, THEMES.DARK);
+                    htmlTheme = THEMES.DARK;
+                }
+            }
+            
+            // 安全なlocalStorageアクセス
+            if (typeof localStorage === 'undefined') {
+                console.log('🎨 localStorage not available, using dark theme');
+                currentTheme = THEMES.DARK;
+                return;
+            }
+            
+            const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+            if (savedTheme && Object.values(THEMES).includes(savedTheme)) {
+                currentTheme = savedTheme;
+                console.log('📖 Loaded saved theme:', savedTheme);
+            } else {
+                console.log('🔧 No saved theme found, using dark theme');
+                currentTheme = THEMES.DARK;
+            }
+        } catch (error) {
+            console.warn('⚠️ Failed to load saved theme:', error);
+            currentTheme = THEMES.DARK; // フォールバック
+        }
+    }
+    
+    /**
+     * テーマ設定を保存
+     * @private
+     * @param {string} theme - 保存するテーマ
+     */
+    function saveTheme(theme) {
+        try {
+            // 安全なlocalStorageアクセス
+            if (typeof localStorage === 'undefined') {
+                console.log('🎨 localStorage not available, skipping theme save');
+                return;
+            }
+            
+            localStorage.setItem(THEME_STORAGE_KEY, theme);
+            console.log('💾 Theme saved:', theme);
+        } catch (error) {
+            console.warn('⚠️ Failed to save theme:', error);
+        }
+    }
+    
+    /**
+     * テーマ切り替えボタンを設定
+     * @private
+     */
+    function setupThemeToggleButtons() {
+        // 安全なDOM操作
+        if (typeof document === 'undefined') {
+            console.log('🎨 Document not available, skipping button setup');
+            return;
+        }
+        
+        // 既存のテーマ切り替えボタンを検索
+        const toggleButtons = document.querySelectorAll('.theme-toggle, [data-action="toggle-theme"]');
+        
+        toggleButtons.forEach(button => {
+            // 既存のイベントリスナーを削除してから追加（重複防止）
+            button.removeEventListener('click', handleThemeToggleClick);
+            button.addEventListener('click', handleThemeToggleClick);
+            themeToggleButtons.push(button);
+        });
+        
+        console.log(`🔘 Found ${toggleButtons.length} theme toggle buttons`);
+        
+        // 動的に追加されるボタンも監視
+        setTimeout(() => {
+            const laterButtons = document.querySelectorAll('.theme-toggle, [data-action="toggle-theme"]');
+            laterButtons.forEach(button => {
+                if (!themeToggleButtons.includes(button)) {
+                    button.removeEventListener('click', handleThemeToggleClick);
+                    button.addEventListener('click', handleThemeToggleClick);
+                    themeToggleButtons.push(button);
+                    console.log('🔘 Added delayed theme toggle button');
+                }
+            });
+        }, 1000);
+    }
+    
+    /**
+     * テーマ切り替えボタンクリックハンドラー
+     * @private
+     * @param {Event} event - クリックイベント
+     */
+    function handleThemeToggleClick(event) {
+        event.preventDefault();
+        toggleTheme();
+    }
+    
+    /**
+     * 現在のテーマを適用
+     * @private
+     */
+    function applyCurrentTheme() {
+        // 安全なDOM操作
+        if (typeof document === 'undefined') {
+            console.log('🎨 Document not available, skipping theme application');
+            return;
+        }
+        
+        const resolvedTheme = resolveTheme(currentTheme);
+        const html = document.documentElement;
+        
+        // HTMLエレメントにテーマ属性を設定
+        html.setAttribute(THEME_ATTRIBUTE, resolvedTheme);
+        
+        // ボディクラスも設定（互換性のため）
+        if (document.body) {
+            document.body.classList.remove('theme-light', 'theme-dark');
+            document.body.classList.add(`theme-${resolvedTheme}`);
+        }
+        
+        // ダークモード用のCSS変数を強制適用
+        if (resolvedTheme === THEMES.DARK) {
+            ensureDarkModeStyles();
+        }
+        
+        // テーマ切り替えボタンのアイコンを更新
+        updateThemeToggleIcons(resolvedTheme);
+        
+        console.log(`🎨 Applied theme: ${resolvedTheme} (from ${currentTheme})`);
+    }
+    
+    /**
+     * テーマを解決（AUTOの場合はシステム設定を使用）
+     * @private
+     * @param {string} theme - 解決するテーマ
+     * @returns {string} 解決されたテーマ
+     */
+    function resolveTheme(theme) {
+        if (theme === THEMES.AUTO) {
+            if (mediaQueryList && mediaQueryList.matches) {
+                return THEMES.DARK;
+            }
+            // システム設定がライトの場合でも、明示的にダークモードを使用
+            return THEMES.DARK;
+        }
+        return theme;
+    }
+    
+    /**
+     * ダークモードスタイルの強制適用
+     * @private
+     */
+    function ensureDarkModeStyles() {
+        if (typeof document === 'undefined') return;
+        
+        const root = document.documentElement;
+        
+        // ダークモード用の基本CSS変数を確実に設定（Material Design 3.0準拠）
+        const darkModeVariables = {
+            '--current-surface': 'var(--md-sys-color-surface)',
+            '--current-surface-container': 'var(--md-sys-color-surface-container)',
+            '--current-surface-container-low': 'var(--md-sys-color-surface-container-low)',
+            '--current-surface-container-high': 'var(--md-sys-color-surface-container-high)',
+            '--current-surface-container-highest': 'var(--md-sys-color-surface-container-highest)',
+            '--current-on-surface': 'var(--md-sys-color-on-surface)',
+            '--current-on-surface-variant': 'var(--md-sys-color-on-surface-variant)',
+            '--current-primary': 'var(--md-sys-color-primary)',
+            '--current-on-primary': 'var(--md-sys-color-on-primary)',
+            '--current-outline': 'var(--md-sys-color-outline)',
+            '--current-outline-variant': 'var(--md-sys-color-outline-variant)',
+            '--current-elevation-1': 'var(--md-elevation-level1)',
+            '--current-elevation-2': 'var(--md-elevation-level2)',
+            '--current-elevation-3': 'var(--md-elevation-level3)',
+            '--current-elevation-4': 'var(--md-elevation-level4)',
+            '--current-elevation-5': 'var(--md-elevation-level5)'
+        };
+        
+        Object.entries(darkModeVariables).forEach(([property, value]) => {
+            root.style.setProperty(property, value);
+        });
+        
+        console.log('🌙 Dark mode CSS variables enforced');
+    }
+    
+    /**
+     * テーマ切り替えボタンのアイコンを更新
+     * @private
+     * @param {string} resolvedTheme - 現在適用されているテーマ
+     */
+    function updateThemeToggleIcons(resolvedTheme) {
+        themeToggleButtons.forEach(button => {
+            const icon = button.querySelector('.material-icons, .material-symbols-outlined');
+            if (icon) {
+                if (resolvedTheme === THEMES.DARK) {
+                    icon.textContent = 'light_mode';
+                    button.setAttribute('title', 'ライトモードに切り替え');
+                    button.setAttribute('aria-label', 'ライトモードに切り替え');
+                } else {
+                    icon.textContent = 'dark_mode';
+                    button.setAttribute('title', 'ダークモードに切り替え');
+                    button.setAttribute('aria-label', 'ダークモードに切り替え');
+                }
+            }
+        });
+    }
+    
+    /**
+     * カスタムイベントリスナーを設定
+     * @private
+     */
+    function setupCustomEventListeners() {
+        // 安全なイベントリスナー設定
+        if (typeof document === 'undefined') {
+            console.log('🎨 Document not available, skipping event listeners');
+            return;
+        }
+        
+        // カスタムテーマ変更イベントをリッスン
+        document.addEventListener('casesdash:theme:set', function(event) {
+            if (event.detail && event.detail.theme) {
+                setTheme(event.detail.theme);
+            }
+        });
+        
+        // カスタムテーマ切り替えイベントをリッスン
+        document.addEventListener('casesdash:theme:toggle', function() {
+            toggleTheme();
+        });
+    }
+    
+    /**
+     * テーマ変更を通知
+     * @private
+     */
+    function notifyThemeChange() {
+        const resolvedTheme = resolveTheme(currentTheme);
+        
+        // 安全なカスタムイベント発火
+        if (typeof document === 'undefined' || typeof CustomEvent === 'undefined') {
+            console.log('🎨 CustomEvent not available, skipping event dispatch');
+        } else {
+            // カスタムイベントを発火
+            const event = new CustomEvent('casesdash:theme:changed', {
+                detail: {
+                    theme: currentTheme,
+                    resolvedTheme: resolvedTheme,
+                    timestamp: Date.now()
+                }
+            });
+            document.dispatchEvent(event);
+        }
+        
+        // 登録されたコールバックを実行（常に実行）
+        themeChangeCallbacks.forEach(callback => {
+            try {
+                callback(currentTheme, resolvedTheme);
+            } catch (error) {
+                console.error('❌ Theme change callback error:', error);
+            }
+        });
+        
+        console.log(`📡 Theme change notified: ${currentTheme} -> ${resolvedTheme}`);
+    }
+    
+    /**
+     * プリロード用のgetComputedStyle呼び出しを安全に実行
+     * @private
+     * @param {HTMLElement} element - 対象要素
+     * @returns {CSSStyleDeclaration|null} スタイル情報またはnull
+     */
+    function safeGetComputedStyle(element) {
+        if (typeof window === 'undefined' || !window.getComputedStyle) {
+            return null;
+        }
+        try {
+            return window.getComputedStyle(element);
+        } catch (error) {
+            console.warn('⚠️ getComputedStyle failed:', error);
+            return null;
+        }
+    }
+    
+    /**
+     * テーマのプリロード（パフォーマンス向上）
+     * @public
+     */
+    function preloadThemes() {
+        // 安全なDOM操作とgetComputedStyle呼び出し
+        if (typeof document === 'undefined') {
+            console.log('🎨 Document not available, skipping theme preload');
+            return;
+        }
+        
+        // CSSファイルの事前読み込みやキャッシュ処理
+        const themes = [THEMES.LIGHT, THEMES.DARK];
+        
+        themes.forEach(theme => {
+            const testElement = document.createElement('div');
+            testElement.setAttribute(THEME_ATTRIBUTE, theme);
+            testElement.style.position = 'absolute';
+            testElement.style.visibility = 'hidden';
+            testElement.style.pointerEvents = 'none';
+            document.body.appendChild(testElement);
+            
+            // 安全な強制スタイル計算
+            const computedStyle = safeGetComputedStyle(testElement);
+            if (computedStyle) {
+                computedStyle.getPropertyValue('background-color');
+            }
+            
+            document.body.removeChild(testElement);
+        });
+        
+        console.log('⚡ Themes preloaded for better performance');
+    }
+    
+    /**
+     * デバッグ情報を取得（安全版）
+     * @public
+     * @returns {Object} デバッグ情報
+     */
+    function getDebugInfo() {
+        return {
+            currentTheme: currentTheme,
+            resolvedTheme: resolveTheme(currentTheme),
+            systemPreference: getSystemPreference(),
+            supportsDarkMode: supportsDarkMode(),
+            toggleButtonsCount: themeToggleButtons.length,
+            callbacksCount: themeChangeCallbacks.length,
+            mediaQuerySupport: typeof window !== 'undefined' && !!window.matchMedia,
+            localStorageSupport: typeof window !== 'undefined' && !!window.localStorage,
+            documentAvailable: typeof document !== 'undefined',
+            windowAvailable: typeof window !== 'undefined'
+        };
+    }
+    
+    /**
+     * テーマを設定
+     * @public
+     * @param {string} theme - 設定するテーマ (light, dark, auto)
+     * @returns {boolean} 設定が成功したかどうか
+     */
+    function setTheme(theme) {
+        if (!Object.values(THEMES).includes(theme)) {
+            console.error('❌ Invalid theme:', theme);
+            return false;
+        }
+        
+        if (currentTheme === theme) {
+            console.log('ℹ️ Theme already set to:', theme);
+            return true;
+        }
+        
+        const previousTheme = currentTheme;
+        currentTheme = theme;
+        
+        // テーマを適用
+        applyCurrentTheme();
+        
+        // テーマを保存
+        saveTheme(theme);
+        
+        // 変更を通知
+        notifyThemeChange();
+        
+        console.log(`🔄 Theme changed: ${previousTheme} -> ${theme}`);
+        return true;
+    }
+    
+    /**
+     * テーマを切り替え（ライト↔ダーク）
+     * @public
+     * @returns {string} 新しいテーマ
+     */
+    function toggleTheme() {
+        const resolvedTheme = resolveTheme(currentTheme);
+        let newTheme;
+        
+        if (resolvedTheme === THEMES.DARK) {
+            newTheme = THEMES.LIGHT;
+        } else {
+            newTheme = THEMES.DARK;
+        }
+        
+        setTheme(newTheme);
+        return newTheme;
+    }
+    
+    /**
+     * 現在のテーマを取得
+     * @public
+     * @returns {string} 現在のテーマ
+     */
+    function getCurrentTheme() {
+        return currentTheme;
+    }
+    
+    /**
+     * 解決された現在のテーマを取得
+     * @public
+     * @returns {string} 解決されたテーマ
+     */
+    function getResolvedTheme() {
+        return resolveTheme(currentTheme);
+    }
+    
+    /**
+     * システムがダークモードをサポートしているかチェック
+     * @public
+     * @returns {boolean} サポートしているかどうか
+     */
+    function supportsDarkMode() {
+        return mediaQueryList !== null;
+    }
+    
+    /**
+     * システムのプリファードカラースキームを取得
+     * @public
+     * @returns {string} システムの設定 (light, dark, unknown)
+     */
+    function getSystemPreference() {
+        if (!mediaQueryList) {
+            return 'unknown';
+        }
+        return mediaQueryList.matches ? THEMES.DARK : THEMES.LIGHT;
+    }
+    
+    /**
+     * テーマ変更コールバックを追加
+     * @public
+     * @param {Function} callback - テーマ変更時に呼び出される関数
+     * @returns {Function} コールバック削除用の関数
+     */
+    function addThemeChangeCallback(callback) {
+        if (typeof callback !== 'function') {
+            console.error('❌ Theme change callback must be a function');
+            return () => {};
+        }
+        
+        themeChangeCallbacks.push(callback);
+        
+        // 削除用の関数を返す
+        return function removeCallback() {
+            const index = themeChangeCallbacks.indexOf(callback);
+            if (index > -1) {
+                themeChangeCallbacks.splice(index, 1);
+            }
+        };
+    }
+    
+    /**
+     * テーマ切り替えボタンを動的に追加
+     * @public
+     * @param {HTMLElement} button - 追加するボタン要素
+     */
+    function addThemeToggleButton(button) {
+        if (!(button instanceof HTMLElement)) {
+            console.error('❌ Invalid theme toggle button element');
+            return;
+        }
+        
+        button.addEventListener('click', handleThemeToggleClick);
+        themeToggleButtons.push(button);
+        
+        // 現在のテーマに合わせてアイコンを更新
+        updateThemeToggleIcons(resolveTheme(currentTheme));
+        
+        console.log('➕ Theme toggle button added');
+    }
+    
+    /**
+     * CSS変数を動的に更新
+     * @public
+     * @param {Object} variables - 更新するCSS変数のオブジェクト
+     */
+    function updateCSSVariables(variables) {
+        // 安全なDOM操作
+        if (typeof document === 'undefined') {
+            console.log('🎨 Document not available, skipping CSS variables update');
+            return;
+        }
+        
+        const root = document.documentElement;
+        
+        Object.entries(variables).forEach(([property, value]) => {
+            root.style.setProperty(property, value);
+        });
+        
+        console.log('🎨 CSS variables updated:', Object.keys(variables));
+    }
+    
+    
+    // === Public API ===
+    return {
+        // Core Functions
+        initialize,
+        setTheme,
+        toggleTheme,
+        getCurrentTheme,
+        getResolvedTheme,
+        
+        // System Information
+        supportsDarkMode,
+        getSystemPreference,
+        
+        // Event Management
+        addThemeChangeCallback,
+        addThemeToggleButton,
+        
+        // Utilities
+        updateCSSVariables,
+        preloadThemes,
+        getDebugInfo,
+        
+        // Constants
+        THEMES
+    };
+    
+})();
+
+// === Auto-initialization ===
+// DOMContentLoadedでの自動初期化（安全版）
+if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            if (window.CasesDashThemeManager) {
+                window.CasesDashThemeManager.initialize();
+            }
+        });
+    } else {
+        // すでにDOMが読み込まれている場合は即座に初期化
+        if (window.CasesDashThemeManager) {
+            window.CasesDashThemeManager.initialize();
+        }
+    }
+}
+
+// === Global Utility Functions ===
+// ブラウザ環境でのみグローバル関数を設定
+if (typeof window !== 'undefined') {
+    /**
+     * グローバルテーマ切り替え関数（既存コードとの互換性のため）
+     * @global
+     */
+    window.toggleTheme = function() {
+        if (window.CasesDashThemeManager) {
+            return window.CasesDashThemeManager.toggleTheme();
+        }
+        console.warn('🎨 ThemeManager not available');
+        return null;
+    };
+
+    /**
+     * グローバルテーマ設定関数
+     * @global
+     * @param {string} theme - 設定するテーマ
+     */
+    window.setTheme = function(theme) {
+        if (window.CasesDashThemeManager) {
+            return window.CasesDashThemeManager.setTheme(theme);
+        }
+        console.warn('🎨 ThemeManager not available');
+        return false;
+    };
+}
+
+console.log('🎨 CasesDash Theme Manager loaded successfully');
+
+})(); // IIFE終了
+</script>

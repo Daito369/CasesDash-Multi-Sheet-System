@@ -1,0 +1,621 @@
+<script>
+/**
+ * CasesDash Main Application JavaScript
+ * Main entry point for client-side functionality
+ * 
+ * @author Roo
+ * @version 1.0
+ * @since 2025-05-25
+ */
+
+// Global namespace for CasesDash application
+// Only execute in client-side environment
+if (typeof window !== 'undefined') {
+  window.CasesDashApp = (function() {
+    'use strict';
+
+  // Application state
+  let appState = {
+    initialized: false,
+    currentUser: null,
+    currentView: 'dashboard',
+    sheetTypes: [],
+    dashboardData: null,
+    liveModeWindow: null,
+    currentFormGenerator: null,
+    selectedSheetType: null,
+    formMode: 'create', // 'create' or 'edit'
+    sentimentData: null,
+    sentimentConfig: null,
+    sentimentChart: null
+  };
+
+  // DOM elements cache
+  let elements = {};
+
+  /**
+   * Initialize the application
+   */
+  async function initialize() {
+    try {
+      console.log('Initializing CasesDash Application...');
+      
+      // Cache DOM elements
+      cacheElements();
+      
+      // Setup event listeners
+      setupEventListeners();
+      
+      // Initialize Material Design components
+      initializeMDC();
+      
+      // Load initial data
+      await loadInitialData();
+      
+      // Initialize CaseManagerModule
+      if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.initialize === 'function') {
+        try {
+          await window.CasesDashCaseManager.initialize();
+          console.log('CaseManagerModule initialized successfully');
+        } catch (error) {
+          console.warn('CaseManagerModule initialization failed:', error);
+        }
+      }
+      
+      // Mark as initialized
+      appState.initialized = true;
+      
+      console.log('CasesDash Application initialized successfully');
+      
+    } catch (error) {
+      console.error('Failed to initialize application:', error);
+      showError('Failed to initialize application. Please refresh the page.');
+    }
+  }
+
+  /**
+   * Cache frequently used DOM elements
+   */
+  function cacheElements() {
+    elements = {
+      loadingOverlay: document.getElementById('loading-overlay'),
+      errorSnackbar: document.getElementById('error-snackbar'),
+      toast: document.getElementById('toast'),
+      liveModeButton: document.getElementById('live-mode-button'),
+      
+      // Views
+      dashboardView: document.getElementById('dashboard-view'),
+      caseListView: document.getElementById('case-list-view'),
+      caseFormView: document.getElementById('case-form-view'),
+      searchView: document.getElementById('search-view'),
+      sentimentView: document.getElementById('sentiment-view'),
+      
+      // Dashboard elements
+      myCasesCount: document.getElementById('my-cases-count'),
+      openCasesCount: document.getElementById('open-cases-count'),
+      closedTodayCount: document.getElementById('closed-today-count'),
+      totalCasesCount: document.getElementById('total-cases-count'),
+      recentActivity: document.getElementById('recent-activity'),
+      
+      // Case list elements
+      casesTableBody: document.getElementById('cases-table-body'),
+      caseSearch: document.getElementById('case-search'),
+      
+      // Form elements
+      caseForm: document.getElementById('case-form'),
+      formTitle: document.getElementById('form-title'),
+      sheetTypeSelector: document.getElementById('sheet-type-selector'),
+      formContainer: document.getElementById('form-container'),
+      formErrorContainer: document.getElementById('form-error-container'),
+      
+      // Search elements
+      searchForm: document.getElementById('search-form'),
+      searchResults: document.getElementById('search-results'),
+      searchSheetType: document.getElementById('search-sheet-type')
+    };
+  }
+
+  /**
+   * Setup event listeners
+   */
+  function setupEventListeners() {
+    // Case search
+    if (elements.caseSearch) {
+      elements.caseSearch.addEventListener('input', debounce(filterCases, 300));
+    }
+
+    // Window events
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('focus', handleWindowFocus);
+    
+    // Live mode window tracking
+    if (elements.liveModeButton) {
+      elements.liveModeButton.addEventListener('click', openLiveMode);
+    }
+  }
+
+  /**
+   * Initialize Material Design Components
+   */
+  function initializeMDC() {
+    try {
+      // Auto-upgrade all MDC components
+      if (typeof componentHandler !== 'undefined') {
+        componentHandler.upgradeAllRegistered();
+      }
+      
+      // Initialize specific components if needed
+      const dialogs = document.querySelectorAll('.mdl-dialog');
+      dialogs.forEach(dialog => {
+        if (!dialog.showModal) {
+          dialogPolyfill.registerDialog(dialog);
+        }
+      });
+      
+    } catch (error) {
+      console.warn('MDC initialization warning:', error);
+    }
+  }
+
+  /**
+   * Load initial application data
+   */
+  async function loadInitialData() {
+    try {
+      showLoading(true);
+      
+      // Load user info and UI configuration
+      const userResponse = await callServerFunction('getCurrentUser');
+      if (userResponse.success) {
+        appState.currentUser = userResponse.data;
+        updateUserInterface(userResponse.data);
+      }
+      
+      // Load available sheet types
+      const sheetTypesResponse = await callServerFunction('getAvailableSheetTypes');
+      if (sheetTypesResponse.success) {
+        appState.sheetTypes = sheetTypesResponse.data;
+        populateSheetTypeSelects();
+      }
+      
+      // Load dashboard data
+      await loadDashboardData();
+      
+      // Initialize and load sentiment functionality
+      if (window.CasesDashSentimentManager) {
+        await window.CasesDashSentimentManager.loadSentimentConfiguration();
+        await window.CasesDashSentimentManager.loadSentimentSummary();
+      }
+      
+    } catch (error) {
+      console.error('Failed to load initial data:', error);
+      showError('Failed to load application data. Some features may not work properly.');
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  /**
+   * Load dashboard data
+   */
+  async function loadDashboardData() {
+    try {
+      const response = await callServerFunction('getDashboardStats');
+      if (response.success) {
+        appState.dashboardData = response.data;
+        updateDashboard(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to load dashboard data:', error);
+    }
+  }
+
+  /**
+   * Update dashboard display
+   */
+  function updateDashboard(data) {
+    if (!data) return;
+
+    // Update stats
+    if (elements.myCasesCount) {
+      elements.myCasesCount.textContent = data.myCases || 0;
+    }
+    if (elements.openCasesCount) {
+      elements.openCasesCount.textContent = data.openCases || 0;
+    }
+    if (elements.closedTodayCount) {
+      elements.closedTodayCount.textContent = data.closedToday || 0;
+    }
+    if (elements.totalCasesCount) {
+      elements.totalCasesCount.textContent = data.totalCases || 0;
+    }
+
+    // Update recent activity
+    if (elements.recentActivity && data.recentActivity) {
+      updateRecentActivity(data.recentActivity);
+    }
+  }
+
+  /**
+   * Update recent activity display
+   */
+  function updateRecentActivity(activities) {
+    if (!elements.recentActivity) return;
+
+    if (!activities || activities.length === 0) {
+      elements.recentActivity.innerHTML = '<p>No recent activity</p>';
+      return;
+    }
+
+    const activityHTML = activities.map(activity => `
+      <div class="activity-item" style="padding: 8px 0; border-bottom: 1px solid #eee;">
+        <div style="font-weight: 500;">${escapeHtml(activity.description || 'Unknown activity')}</div>
+        <div style="font-size: 12px; color: #666; margin-top: 4px;">
+          ${formatRelativeTime(activity.timestamp)}
+        </div>
+      </div>
+    `).join('');
+
+    elements.recentActivity.innerHTML = activityHTML;
+  }
+
+  /**
+   * Update user interface based on user role
+   */
+  function updateUserInterface(userData) {
+    // Store user email in localStorage for client-side access
+    if (userData.email) {
+      localStorage.setItem('casesdash_user_email', userData.email);
+      window.currentUserEmail = userData.email; // Global fallback
+    }
+    
+    // Show/hide admin navigation
+    const adminNav = document.getElementById('admin-nav');
+    if (adminNav && userData.role === 'admin') {
+      adminNav.style.display = 'block';
+    }
+
+    // Update user display if needed
+    console.log('User loaded:', userData.email, 'Role:', userData.role);
+  }
+
+  /**
+   * Populate sheet type select elements
+   */
+  function populateSheetTypeSelects() {
+    const selects = document.querySelectorAll('select[id*="sheet-type"]');
+    selects.forEach(select => {
+      // Clear existing options except "All" option
+      const options = Array.from(select.options);
+      options.forEach(option => {
+        if (option.value !== '') {
+          option.remove();
+        }
+      });
+
+      // Add sheet type options
+      appState.sheetTypes.forEach(sheetType => {
+        const option = document.createElement('option');
+        option.value = sheetType;
+        option.textContent = sheetType;
+        select.appendChild(option);
+      });
+    });
+  }
+
+  /**
+   * Open Live Mode window
+   */
+  function openLiveMode() {
+    try {
+      if (appState.liveModeWindow && !appState.liveModeWindow.closed) {
+        // Focus existing window
+        appState.liveModeWindow.focus();
+        return;
+      }
+
+      // Get current web app URL
+      const currentUrl = window.location.href;
+      const baseUrl = currentUrl.split('?')[0];
+      const liveModeUrl = `${baseUrl}?page=live-mode`;
+
+      // Open new window with specific dimensions
+      const windowFeatures = [
+        'width=1200',
+        'height=800',
+        'left=100',
+        'top=100',
+        'resizable=yes',
+        'scrollbars=yes',
+        'status=yes',
+        'toolbar=no',
+        'menubar=no',
+        'location=no'
+      ].join(',');
+
+      appState.liveModeWindow = window.open(liveModeUrl, 'CasesDashLiveMode', windowFeatures);
+
+      if (!appState.liveModeWindow) {
+        throw new Error('Failed to open Live Mode window. Please check popup blocker settings.');
+      }
+
+      // Show success message
+      showToast('Live Mode window opened successfully', 'success');
+
+      // Monitor window status
+      const checkClosed = setInterval(() => {
+        if (appState.liveModeWindow.closed) {
+          clearInterval(checkClosed);
+          appState.liveModeWindow = null;
+          console.log('Live Mode window closed');
+        }
+      }, 1000);
+
+    } catch (error) {
+      console.error('Failed to open Live Mode:', error);
+      showError(error.message || 'Failed to open Live Mode window');
+    }
+  }
+
+  /**
+   * Navigation functions
+   */
+  function showDashboard() {
+    switchView('dashboard');
+    loadDashboardData();
+  }
+
+  function showCaseList() {
+    try {
+      switchView('case-list');
+      
+      // Initialize CaseManagerModule if available
+      if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.initialize === 'function') {
+        window.CasesDashCaseManager.initialize();
+        window.CasesDashCaseManager.loadUserCases();
+      } else {
+        // Fallback to legacy approach
+        console.warn('CaseManagerModule not available, using legacy approach');
+        loadUserCases();
+      }
+    } catch (error) {
+      console.error('ケースリスト表示エラー:', error);
+      showError('ケースリストの表示に失敗しました: ' + error.message);
+    }
+  }
+
+  function showCreateCase() {
+    try {
+      // Check if CaseManagerModule is available and properly initialized
+      if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.createNewCase === 'function') {
+        // Use the new integrated case creation flow
+        window.CasesDashCaseManager.createNewCase();
+      } else {
+        // Fallback to legacy form approach
+        console.warn('CaseManagerModule not available, using legacy form approach');
+        switchView('case-form');
+        setupCaseForm();
+      }
+    } catch (error) {
+      console.error('ケース作成エラー:', error);
+      showError('ケース作成フォームの表示に失敗しました: ' + error.message);
+    }
+  }
+
+  function showAdvancedSearch() {
+    switchView('search');
+  }
+
+  /**
+   * Switch between views with smooth animations
+   */
+  function switchView(viewName) {
+    const currentView = document.querySelector('.view-container:not([style*="display: none"])');
+    const targetView = elements[viewName + 'View'];
+    
+    if (!targetView || targetView === currentView) return;
+    
+    // Update navigation active state
+    updateNavigationState(viewName);
+    
+    // Perform animated transition
+    if (currentView) {
+      // Fade out current view
+      currentView.style.opacity = '0';
+      currentView.style.transform = 'translateY(-20px)';
+      
+      setTimeout(() => {
+        currentView.style.display = 'none';
+        showTargetView(targetView, viewName);
+      }, 200);
+    } else {
+      showTargetView(targetView, viewName);
+    }
+  }
+
+  /**
+   * Utility functions
+   */
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  function escapeHtml(text) {
+    if (typeof text !== 'string') return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function formatRelativeTime(timestamp) {
+    if (!timestamp) return 'Unknown time';
+    
+    try {
+      const date = new Date(timestamp);
+      const now = new Date();
+      const diffMs = now - date;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMs / 3600000);
+      const diffDays = Math.floor(diffMs / 86400000);
+
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins} minutes ago`;
+      if (diffHours < 24) return `${diffHours} hours ago`;
+      if (diffDays < 7) return `${diffDays} days ago`;
+      
+      return date.toLocaleDateString();
+    } catch (error) {
+      return 'Invalid date';
+    }
+  }
+
+  /**
+   * Call server function
+   */
+  function callServerFunction(functionName, ...args) {
+    return new Promise((resolve, reject) => {
+      try {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          [functionName](...args);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Show loading overlay
+   */
+  function showLoading(show) {
+    if (elements.loadingOverlay) {
+      elements.loadingOverlay.style.display = show ? 'flex' : 'none';
+    }
+  }
+
+  /**
+   * Show error message
+   */
+  function showError(message) {
+    showToast(message, 'error');
+  }
+
+  /**
+   * Show toast notification
+   */
+  function showToast(message, type = 'info') {
+    if (elements.toast) {
+      const snackbar = elements.toast.MaterialSnackbar;
+      if (snackbar) {
+        snackbar.showSnackbar({
+          message: message,
+          timeout: 4000
+        });
+      }
+    }
+  }
+
+  // Minimal implementation for testing
+  function showTargetView(targetView, viewName) {
+    targetView.style.display = 'block';
+    appState.currentView = viewName;
+  }
+
+  function updateNavigationState(viewName) {
+    const navLinks = document.querySelectorAll('.nav-link');
+    navLinks.forEach(link => {
+      link.classList.remove('active');
+      if (link.getAttribute('data-view') === viewName) {
+        link.classList.add('active');
+      }
+    });
+  }
+
+  function loadUserCases() {
+    console.log('Loading user cases...');
+  }
+
+  function setupCaseForm() {
+    console.log('Setting up case form...');
+  }
+
+  function filterCases() {
+    console.log('Filtering cases...');
+  }
+
+  function handleBeforeUnload() {
+    if (appState.liveModeWindow && !appState.liveModeWindow.closed) {
+      appState.liveModeWindow.close();
+    }
+  }
+
+  function handleWindowFocus() {
+    if (appState.currentView === 'dashboard') {
+      loadDashboardData();
+    }
+  }
+
+  // Expose public API
+  return {
+    initialize,
+    showDashboard,
+    showCaseList,
+    showCreateCase,
+    showAdvancedSearch,
+    openLiveMode,
+    getState: () => ({ ...appState }),
+    callServerFunction,
+    showLoading,
+    showError,
+    showToast
+  };
+})();
+
+// Global functions for HTML onclick handlers
+function showDashboard() {
+  window.CasesDashApp.showDashboard();
+}
+
+function showCaseList() {
+  window.CasesDashApp.showCaseList();
+}
+
+function showCreateCase() {
+  window.CasesDashApp.showCreateCase();
+}
+
+function showAdvancedSearch() {
+  window.CasesDashApp.showAdvancedSearch();
+}
+
+function openLiveMode() {
+  window.CasesDashApp.openLiveMode();
+}
+
+/**
+ * Initialize the CasesDash application when DOM is ready
+ */
+document.addEventListener('DOMContentLoaded', async function() {
+  if (window.CasesDashApp && typeof window.CasesDashApp.initialize === 'function') {
+    try {
+      await window.CasesDashApp.initialize();
+    } catch (error) {
+      console.error('アプリケーション初期化エラー:', error);
+    }
+  }
+});
+
+// Also expose as AppMain for consistency with other modules
+window.AppMain = window.CasesDashApp;
+
+} // End of window check
+</script>

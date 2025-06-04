@@ -1,0 +1,1049 @@
+<script>
+/**
+ * CasesDash - Form Generator
+ * Dynamic Material Design form generation for all sheet types
+ * 
+ * @author Roo
+ * @version 1.0
+ * @since 2025-05-25
+ */
+
+if (typeof window !== 'undefined') {
+  window.CasesDashFormGenerator = (function() {
+    'use strict';
+
+    /**
+     * CasesDashFormGenerator class for dynamic form creation
+     * Generates Material Design forms based on sheet type and validation rules
+     */
+    class CasesDashFormGenerator {
+      
+      /**
+       * Constructor
+       * @param {string} sheetType - Sheet type for form generation
+       * @param {Object} options - Form options and configuration
+       */
+      constructor(sheetType, options = {}) {
+        this.sheetType = sheetType;
+        this.sheetMapper = new window.CasesDashSheetMapper.SheetMapper(sheetType);
+        this.privacyManager = options.privacyManager || null;
+        this.options = {
+          enableRealTimeValidation: true,
+          enableAutoSave: false,
+          showOptionalFields: true,
+          enableProgressStepper: false,
+          materialDesignVersion: '3.0',
+          ...options
+        };
+        
+        this.formData = {};
+        this.validationErrors = {};
+        this.fieldComponents = new Map();
+        this.eventListeners = new Map();
+        
+        this.initializeMaterialDesign();
+      }
+      
+      /**
+       * Initialize Material Design components
+       * @private
+       */
+      initializeMaterialDesign() {
+        try {
+          // Import Material Design CSS if not already loaded
+          if (!document.querySelector('link[href*="material-components-web"]')) {
+            const materialCSS = document.createElement('link');
+            materialCSS.rel = 'stylesheet';
+            materialCSS.href = 'https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css';
+            document.head.appendChild(materialCSS);
+          }
+          
+          // Import Material Design JS if not already loaded
+          if (!window.mdc) {
+            const materialJS = document.createElement('script');
+            materialJS.src = 'https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js';
+            document.head.appendChild(materialJS);
+          }
+          
+        } catch (error) {
+          console.error('Failed to initialize Material Design:', error);
+        }
+      }
+      
+      /**
+       * Generate complete form for sheet type
+       * @param {string} containerId - Container element ID
+       * @param {Object} initialData - Initial form data
+       * @returns {HTMLElement} Generated form element
+       */
+      generateForm(containerId, initialData = {}) {
+        try {
+          const container = document.getElementById(containerId);
+          if (!container) {
+            throw new Error(`Container element with ID '${containerId}' not found`);
+          }
+          
+          this.formData = { ...initialData };
+          
+          // Create form structure
+          const formElement = this.createFormElement();
+          const headerSection = this.createFormHeader();
+          const fieldsSection = this.createFieldsSection();
+          const actionsSection = this.createActionsSection();
+          
+          // Assemble form
+          formElement.appendChild(headerSection);
+          formElement.appendChild(fieldsSection);
+          formElement.appendChild(actionsSection);
+          
+          // Clear container and add form
+          container.innerHTML = '';
+          container.appendChild(formElement);
+          
+          // Initialize Material Design components
+          this.initializeMDCComponents(formElement);
+          
+          // Setup event listeners
+          this.setupEventListeners(formElement);
+          
+          return formElement;
+          
+        } catch (error) {
+          console.error('Failed to generate form:', error);
+          return this.createErrorElement('Failed to generate form. Please refresh and try again.');
+        }
+      }
+      
+      /**
+       * Create form element with Material Design classes
+       * @private
+       * @returns {HTMLElement} Form element
+       */
+      createFormElement() {
+        const form = document.createElement('form');
+        form.className = 'casesdash-form mdc-card mdc-card--outlined';
+        form.setAttribute('novalidate', 'true');
+        form.id = `casesdash-form-${this.sheetType.replace(/\s+/g, '-').toLowerCase()}`;
+        
+        return form;
+      }
+      
+      /**
+       * Create form header section
+       * @private
+       * @returns {HTMLElement} Header section
+       */
+      createFormHeader() {
+        const header = document.createElement('div');
+        header.className = 'casesdash-form__header mdc-card__primary-action';
+        
+        const title = document.createElement('h2');
+        title.className = 'mdc-typography--headline5';
+        title.textContent = `New ${this.sheetType} Case`;
+        
+        const subtitle = document.createElement('p');
+        subtitle.className = 'mdc-typography--body2 mdc-theme--text-secondary-on-background';
+        subtitle.textContent = this.getFormDescription();
+        
+        header.appendChild(title);
+        header.appendChild(subtitle);
+        
+        return header;
+      }
+      
+      /**
+       * Get form description based on sheet type
+       * @private
+       * @returns {string} Form description
+       */
+      getFormDescription() {
+        const descriptions = {
+          'OT Email': 'Create a new OT Email case with customer support details',
+          '3PO Email': 'Create a new 3PO Email case with partner support information',
+          'OT Chat': 'Create a new OT Chat case for live chat support',
+          '3PO Chat': 'Create a new 3PO Chat case for partner chat support',
+          'OT Phone': 'Create a new OT Phone case for voice support',
+          '3PO Phone': 'Create a new 3PO Phone case for partner phone support'
+        };
+        
+        return descriptions[this.sheetType] || 'Create a new case';
+      }
+      
+      /**
+       * Create fields section with dynamic field generation
+       * @private
+       * @returns {HTMLElement} Fields section
+       */
+      createFieldsSection() {
+        const section = document.createElement('div');
+        section.className = 'casesdash-form__fields';
+        
+        // Get field groups based on sheet type
+        const fieldGroups = this.getFieldGroups();
+        
+        fieldGroups.forEach((group, index) => {
+          const groupElement = this.createFieldGroup(group, index);
+          section.appendChild(groupElement);
+        });
+        
+        return section;
+      }
+      
+      /**
+       * Get field groups organized by category
+       * @private
+       * @returns {Array} Array of field groups
+       */
+      getFieldGroups() {
+        const allFields = this.sheetMapper.getAllMappings();
+        const requiredFields = this.sheetMapper.getRequiredFields();
+        const sheetSpecificFields = this.sheetMapper.getSheetSpecificFields();
+        
+        const groups = [
+          {
+            title: 'Basic Information',
+            fields: ['caseId', 'caseOpenDate', 'caseOpenTime', 'incomingSegment', 'productCategory'],
+            required: true
+          }
+        ];
+        
+        // Add sheet-specific group
+        if (sheetSpecificFields.length > 0) {
+          if (this.sheetType.includes('3PO')) {
+            groups.push({
+              title: '3PO Specific',
+              fields: ['issueCategory', 'details'],
+              required: true
+            });
+          }
+        }
+        
+        // Add optional groups
+        groups.push({
+          title: 'Case Details',
+          fields: ['triage', 'preferEither', 'is30', 'firstAssignee'],
+          required: false
+        });
+        
+        return groups.filter(group =>
+          group.fields.some(field => allFields.hasOwnProperty(field))
+        );
+      }
+      
+      /**
+       * Create field group with Material Design styling
+       * @private
+       * @param {Object} group - Field group configuration
+       * @param {number} index - Group index
+       * @returns {HTMLElement} Field group element
+       */
+      createFieldGroup(group, index) {
+        const groupElement = document.createElement('div');
+        groupElement.className = 'casesdash-form__group';
+        
+        // Group header
+        const header = document.createElement('div');
+        header.className = 'casesdash-form__group-header';
+        
+        const title = document.createElement('h3');
+        title.className = 'mdc-typography--headline6';
+        title.textContent = group.title;
+        
+        header.appendChild(title);
+        groupElement.appendChild(header);
+        
+        // Group fields
+        const fieldsContainer = document.createElement('div');
+        fieldsContainer.className = 'casesdash-form__group-fields';
+        
+        group.fields.forEach(fieldName => {
+          if (this.sheetMapper.getColumn(fieldName)) {
+            const fieldElement = this.createField(fieldName);
+            if (fieldElement) {
+              fieldsContainer.appendChild(fieldElement);
+            }
+          }
+        });
+        
+        groupElement.appendChild(fieldsContainer);
+        
+        return groupElement;
+      }
+      
+      /**
+       * Create individual field with appropriate input type
+       * @private
+       * @param {string} fieldName - Field name
+       * @returns {HTMLElement} Field element
+       */
+      createField(fieldName) {
+        try {
+          const fieldConfig = this.getFieldConfiguration(fieldName);
+          const isRequired = this.sheetMapper.getRequiredFields().includes(fieldName);
+          
+          let fieldElement;
+          
+          switch (fieldConfig.type) {
+            case 'select':
+              fieldElement = this.createSelectField(fieldName, fieldConfig, isRequired);
+              break;
+            case 'textarea':
+              fieldElement = this.createTextareaField(fieldName, fieldConfig, isRequired);
+              break;
+            case 'checkbox':
+              fieldElement = this.createCheckboxField(fieldName, fieldConfig, isRequired);
+              break;
+            case 'date':
+              fieldElement = this.createDateField(fieldName, fieldConfig, isRequired);
+              break;
+            case 'time':
+              fieldElement = this.createTimeField(fieldName, fieldConfig, isRequired);
+              break;
+            default:
+              fieldElement = this.createTextField(fieldName, fieldConfig, isRequired);
+          }
+          
+          if (fieldElement) {
+            this.fieldComponents.set(fieldName, fieldElement);
+          }
+          
+          return fieldElement;
+          
+        } catch (error) {
+          console.error(`Failed to create field ${fieldName}:`, error);
+          return null;
+        }
+      }
+      
+      /**
+       * Get field configuration including validation rules
+       * @private
+       * @param {string} fieldName - Field name
+       * @returns {Object} Field configuration
+       */
+      getFieldConfiguration(fieldName) {
+        const baseConfig = {
+          label: this.getFieldLabel(fieldName),
+          placeholder: this.getFieldPlaceholder(fieldName),
+          helpText: this.getFieldHelpText(fieldName),
+          type: 'text',
+          options: null,
+          validation: {}
+        };
+        
+        // Field-specific configurations
+        const configurations = {
+          caseId: {
+            type: 'text',
+            placeholder: 'Auto-generated if empty',
+            helpText: 'Leave empty for auto-generation'
+          },
+          caseOpenDate: {
+            type: 'date',
+            validation: { required: true }
+          },
+          caseOpenTime: {
+            type: 'time',
+            validation: { required: true }
+          },
+          incomingSegment: {
+            type: 'select',
+            options: ['Platinum', 'Titanium', 'Gold', 'Silver', 'Bronze - Low', 'Bronze - High'],
+            validation: { required: true }
+          },
+          productCategory: {
+            type: 'select',
+            options: ['Search', 'Display', 'Video', 'Commerce', 'Apps', 'M&A', 'Policy', 'Billing', 'Other'],
+            validation: { required: true }
+          },
+          issueCategory: {
+            type: 'select',
+            options: ['Technical', 'Account', 'Billing', 'Policy', 'General'],
+            validation: { required: true }
+          },
+          details: {
+            type: 'textarea',
+            placeholder: 'Provide detailed description of the issue...',
+            validation: { required: true, minLength: 10 }
+          },
+          triage: {
+            type: 'checkbox',
+            helpText: 'Check if case requires triage'
+          }
+        };
+        
+        return { ...baseConfig, ...configurations[fieldName] };
+      }
+      
+      /**
+       * Get human-readable field label
+       * @private
+       * @param {string} fieldName - Field name
+       * @returns {string} Field label
+       */
+      getFieldLabel(fieldName) {
+        return this.sheetMapper.getFieldDisplayName(fieldName);
+      }
+      
+      /**
+       * Get field placeholder text
+       * @private
+       * @param {string} fieldName - Field name
+       * @returns {string} Placeholder text
+       */
+      getFieldPlaceholder(fieldName) {
+        const placeholders = {
+          caseId: 'e.g., OTE-123456-789',
+          firstAssignee: 'Enter assignee email',
+          details: 'Provide detailed description...'
+        };
+        
+        return placeholders[fieldName] || `Enter ${this.getFieldLabel(fieldName).toLowerCase()}`;
+      }
+      
+      /**
+       * Get field help text
+       * @private
+       * @param {string} fieldName - Field name
+       * @returns {string} Help text
+       */
+      getFieldHelpText(fieldName) {
+        const helpTexts = {
+          caseId: 'Unique identifier for the case. Auto-generated if left empty.',
+          incomingSegment: 'Customer segment classification',
+          productCategory: 'Primary product related to this case',
+          issueCategory: 'Type of issue being reported',
+          details: 'Comprehensive description of the case details'
+        };
+        
+        return helpTexts[fieldName] || '';
+      }
+
+      /**
+       * Create Material Design text field
+       * @private
+       * @param {string} fieldName - Field name
+       * @param {Object} config - Field configuration
+       * @param {boolean} isRequired - Whether field is required
+       * @returns {HTMLElement} Text field element
+       */
+      createTextField(fieldName, config, isRequired) {
+        const container = document.createElement('div');
+        container.className = 'casesdash-form__field mdc-text-field mdc-text-field--outlined';
+        
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = `field-${fieldName}`;
+        input.name = fieldName;
+        input.className = 'mdc-text-field__input';
+        input.placeholder = config.placeholder;
+        input.value = this.formData[fieldName] || '';
+        
+        if (isRequired) {
+          input.required = true;
+          input.setAttribute('aria-required', 'true');
+        }
+        
+        const notchedOutline = this.createNotchedOutline(config.label, isRequired);
+        
+        container.appendChild(input);
+        container.appendChild(notchedOutline);
+        
+        if (config.helpText) {
+          const helpText = this.createHelpText(fieldName, config.helpText);
+          container.appendChild(helpText);
+        }
+        
+        return this.wrapFieldInContainer(container, fieldName, config);
+      }
+
+      /**
+       * Create Material Design select field
+       * @private
+       * @param {string} fieldName - Field name
+       * @param {Object} config - Field configuration
+       * @param {boolean} isRequired - Whether field is required
+       * @returns {HTMLElement} Select field element
+       */
+      createSelectField(fieldName, config, isRequired) {
+        const container = document.createElement('div');
+        container.className = 'casesdash-form__field';
+        
+        const label = document.createElement('label');
+        label.textContent = config.label + (isRequired ? ' *' : '');
+        label.setAttribute('for', `field-${fieldName}`);
+        
+        const select = document.createElement('select');
+        select.id = `field-${fieldName}`;
+        select.name = fieldName;
+        select.className = 'mdl-textfield__input';
+        
+        if (isRequired) {
+          select.required = true;
+        }
+        
+        // Add empty option if not required
+        if (!isRequired) {
+          const emptyOption = document.createElement('option');
+          emptyOption.value = '';
+          emptyOption.textContent = '-- Select Option --';
+          select.appendChild(emptyOption);
+        }
+        
+        // Add options
+        config.options.forEach(option => {
+          const optionElement = document.createElement('option');
+          optionElement.value = option;
+          optionElement.textContent = option;
+          if (this.formData[fieldName] === option) {
+            optionElement.selected = true;
+          }
+          select.appendChild(optionElement);
+        });
+        
+        container.appendChild(label);
+        container.appendChild(select);
+        
+        if (config.helpText) {
+          const helpText = document.createElement('div');
+          helpText.className = 'help-text';
+          helpText.textContent = config.helpText;
+          container.appendChild(helpText);
+        }
+        
+        return this.wrapFieldInContainer(container, fieldName, config);
+      }
+
+      /**
+       * Create Material Design textarea field
+       * @private
+       * @param {string} fieldName - Field name
+       * @param {Object} config - Field configuration
+       * @param {boolean} isRequired - Whether field is required
+       * @returns {HTMLElement} Textarea field element
+       */
+      createTextareaField(fieldName, config, isRequired) {
+        const container = document.createElement('div');
+        container.className = 'casesdash-form__field';
+        
+        const label = document.createElement('label');
+        label.textContent = config.label + (isRequired ? ' *' : '');
+        label.setAttribute('for', `field-${fieldName}`);
+        
+        const textarea = document.createElement('textarea');
+        textarea.id = `field-${fieldName}`;
+        textarea.name = fieldName;
+        textarea.className = 'mdl-textfield__input';
+        textarea.placeholder = config.placeholder;
+        textarea.rows = 4;
+        textarea.value = this.formData[fieldName] || '';
+        
+        if (isRequired) {
+          textarea.required = true;
+        }
+        
+        container.appendChild(label);
+        container.appendChild(textarea);
+        
+        if (config.helpText) {
+          const helpText = document.createElement('div');
+          helpText.className = 'help-text';
+          helpText.textContent = config.helpText;
+          container.appendChild(helpText);
+        }
+        
+        return this.wrapFieldInContainer(container, fieldName, config);
+      }
+
+      /**
+       * Create Material Design checkbox field
+       * @private
+       * @param {string} fieldName - Field name
+       * @param {Object} config - Field configuration
+       * @param {boolean} isRequired - Whether field is required
+       * @returns {HTMLElement} Checkbox field element
+       */
+      createCheckboxField(fieldName, config, isRequired) {
+        const container = document.createElement('div');
+        container.className = 'casesdash-form__field casesdash-form__field--checkbox';
+        
+        const label = document.createElement('label');
+        label.className = 'mdl-checkbox mdl-js-checkbox';
+        label.setAttribute('for', `field-${fieldName}`);
+        
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.id = `field-${fieldName}`;
+        input.name = fieldName;
+        input.className = 'mdl-checkbox__input';
+        input.checked = this.formData[fieldName] || false;
+        
+        const labelText = document.createElement('span');
+        labelText.className = 'mdl-checkbox__label';
+        labelText.textContent = config.label;
+        
+        label.appendChild(input);
+        label.appendChild(labelText);
+        
+        container.appendChild(label);
+        
+        if (config.helpText) {
+          const helpText = document.createElement('div');
+          helpText.className = 'help-text';
+          helpText.textContent = config.helpText;
+          container.appendChild(helpText);
+        }
+        
+        return this.wrapFieldInContainer(container, fieldName, config);
+      }
+
+      /**
+       * Create Material Design date field
+       * @private
+       * @param {string} fieldName - Field name
+       * @param {Object} config - Field configuration
+       * @param {boolean} isRequired - Whether field is required
+       * @returns {HTMLElement} Date field element
+       */
+      createDateField(fieldName, config, isRequired) {
+        const container = document.createElement('div');
+        container.className = 'casesdash-form__field';
+        
+        const label = document.createElement('label');
+        label.textContent = config.label + (isRequired ? ' *' : '');
+        label.setAttribute('for', `field-${fieldName}`);
+        
+        const input = document.createElement('input');
+        input.type = 'date';
+        input.id = `field-${fieldName}`;
+        input.name = fieldName;
+        input.className = 'mdl-textfield__input';
+        
+        // Set default to today if no value
+        if (!this.formData[fieldName]) {
+          input.value = new Date().toISOString().split('T')[0];
+        } else {
+          input.value = this.formData[fieldName];
+        }
+        
+        if (isRequired) {
+          input.required = true;
+        }
+        
+        container.appendChild(label);
+        container.appendChild(input);
+        
+        if (config.helpText) {
+          const helpText = document.createElement('div');
+          helpText.className = 'help-text';
+          helpText.textContent = config.helpText;
+          container.appendChild(helpText);
+        }
+        
+        return this.wrapFieldInContainer(container, fieldName, config);
+      }
+
+      /**
+       * Create Material Design time field
+       * @private
+       * @param {string} fieldName - Field name
+       * @param {Object} config - Field configuration
+       * @param {boolean} isRequired - Whether field is required
+       * @returns {HTMLElement} Time field element
+       */
+      createTimeField(fieldName, config, isRequired) {
+        const container = document.createElement('div');
+        container.className = 'casesdash-form__field';
+        
+        const label = document.createElement('label');
+        label.textContent = config.label + (isRequired ? ' *' : '');
+        label.setAttribute('for', `field-${fieldName}`);
+        
+        const input = document.createElement('input');
+        input.type = 'time';
+        input.id = `field-${fieldName}`;
+        input.name = fieldName;
+        input.className = 'mdl-textfield__input';
+        
+        // Set default to current time if no value
+        if (!this.formData[fieldName]) {
+          const now = new Date();
+          input.value = now.toTimeString().slice(0, 5);
+        } else {
+          input.value = this.formData[fieldName];
+        }
+        
+        if (isRequired) {
+          input.required = true;
+        }
+        
+        container.appendChild(label);
+        container.appendChild(input);
+        
+        if (config.helpText) {
+          const helpText = document.createElement('div');
+          helpText.className = 'help-text';
+          helpText.textContent = config.helpText;
+          container.appendChild(helpText);
+        }
+        
+        return this.wrapFieldInContainer(container, fieldName, config);
+      }
+
+      /**
+       * Create notched outline for Material Design fields
+       * @private
+       * @param {string} label - Field label
+       * @param {boolean} isRequired - Whether field is required
+       * @returns {HTMLElement} Notched outline element
+       */
+      createNotchedOutline(label, isRequired) {
+        const outline = document.createElement('div');
+        outline.className = 'mdc-notched-outline';
+        
+        const leading = document.createElement('div');
+        leading.className = 'mdc-notched-outline__leading';
+        
+        const notch = document.createElement('div');
+        notch.className = 'mdc-notched-outline__notch';
+        
+        const labelElement = document.createElement('span');
+        labelElement.className = 'mdc-floating-label';
+        labelElement.textContent = label + (isRequired ? ' *' : '');
+        
+        notch.appendChild(labelElement);
+        
+        const trailing = document.createElement('div');
+        trailing.className = 'mdc-notched-outline__trailing';
+        
+        outline.appendChild(leading);
+        outline.appendChild(notch);
+        outline.appendChild(trailing);
+        
+        return outline;
+      }
+
+      /**
+       * Create help text element
+       * @private
+       * @param {string} fieldName - Field name
+       * @param {string} helpText - Help text
+       * @returns {HTMLElement} Help text element
+       */
+      createHelpText(fieldName, helpText) {
+        const helpElement = document.createElement('div');
+        helpElement.className = 'help-text';
+        helpElement.id = `${fieldName}-helper-text`;
+        helpElement.textContent = helpText;
+        
+        return helpElement;
+      }
+
+      /**
+       * Wrap field in container with proper spacing
+       * @private
+       * @param {HTMLElement} fieldElement - Field element
+       * @param {string} fieldName - Field name
+       * @param {Object} config - Field configuration
+       * @returns {HTMLElement} Wrapped field element
+       */
+      wrapFieldInContainer(fieldElement, fieldName, config) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'casesdash-form__field-wrapper';
+        wrapper.setAttribute('data-field', fieldName);
+        
+        wrapper.appendChild(fieldElement);
+        
+        return wrapper;
+      }
+
+      /**
+       * Create actions section with buttons
+       * @private
+       * @returns {HTMLElement} Actions section
+       */
+      createActionsSection() {
+        const section = document.createElement('div');
+        section.className = 'casesdash-form__actions';
+        
+        // Submit button
+        const submitButton = document.createElement('button');
+        submitButton.type = 'submit';
+        submitButton.className = 'mdl-button mdl-js-button mdl-button--raised mdl-button--colored';
+        submitButton.textContent = 'ケースを作成';
+        
+        section.appendChild(submitButton);
+        
+        return section;
+      }
+
+      /**
+       * Setup event listeners for form interactions
+       * @private
+       * @param {HTMLElement} form - Form element
+       */
+      setupEventListeners(form) {
+        // Form submission
+        form.addEventListener('submit', (e) => this.handleFormSubmit(e));
+        
+        // Field change events for real-time validation
+        if (this.options.enableRealTimeValidation) {
+          this.setupRealTimeValidation(form);
+        }
+      }
+
+      /**
+       * Setup real-time validation
+       * @private
+       * @param {HTMLElement} form - Form element
+       */
+      setupRealTimeValidation(form) {
+        const fields = form.querySelectorAll('input, select, textarea');
+        
+        fields.forEach(field => {
+          field.addEventListener('blur', () => {
+            this.validateField(field.name, field.value);
+          });
+          
+          field.addEventListener('input', () => {
+            // Clear error state on input
+            this.clearFieldError(field.name);
+          });
+        });
+      }
+
+      /**
+       * Handle form submission
+       * @private
+       * @param {Event} event - Submit event
+       */
+      async handleFormSubmit(event) {
+        event.preventDefault();
+        
+        try {
+          // Collect form data
+          const formData = this.collectFormData(event.target);
+          
+          // Validate all fields
+          const isValid = this.validateAllFields(formData);
+          
+          if (!isValid) {
+            this.showValidationErrors();
+            return;
+          }
+          
+          // Add metadata
+          formData.sheetType = this.sheetType;
+          formData.createdDate = new Date().toISOString();
+          formData.status = 'Open'; // Default status
+          
+          console.log('ケースデータ:', formData);
+          
+          // Call success callback with form data
+          if (this.options.onSuccess) {
+            // Simulate server call - in real implementation this would call the server
+            const result = await this.submitToServer(formData);
+            this.options.onSuccess(result);
+          }
+          
+        } catch (error) {
+          console.error('Form submission error:', error);
+          if (this.options.onError) {
+            this.options.onError(error);
+          }
+        }
+      }
+
+      /**
+       * Submit form data to server (placeholder for actual implementation)
+       * @private
+       * @param {Object} formData - Form data to submit
+       * @returns {Promise<Object>} Submission result
+       */
+      async submitToServer(formData) {
+        // This would be replaced with actual server call
+        if (window.CasesDashApp && typeof window.CasesDashApp.callServerFunction === 'function') {
+          return await window.CasesDashApp.callServerFunction('createCase', formData);
+        } else {
+          // Fallback for testing
+          return new Promise((resolve) => {
+            setTimeout(() => {
+              resolve({
+                success: true,
+                data: {
+                  caseId: 'TEST-' + Date.now(),
+                  ...formData
+                }
+              });
+            }, 1000);
+          });
+        }
+      }
+
+      /**
+       * Collect data from all form fields
+       * @private
+       * @param {HTMLElement} form - Form element
+       * @returns {Object} Form data object
+       */
+      collectFormData(form) {
+        const data = {};
+        const formData = new FormData(form);
+        
+        for (let [key, value] of formData.entries()) {
+          // Handle checkboxes
+          const field = form.querySelector(`[name="${key}"]`);
+          if (field && field.type === 'checkbox') {
+            data[key] = field.checked;
+          } else {
+            data[key] = value;
+          }
+        }
+        
+        return data;
+      }
+
+      /**
+       * Validate all form fields
+       * @private
+       * @param {Object} formData - Form data to validate
+       * @returns {boolean} Whether all fields are valid
+       */
+      validateAllFields(formData) {
+        this.validationErrors = {};
+        let isValid = true;
+        
+        Object.keys(formData).forEach(fieldName => {
+          const fieldValid = this.validateField(fieldName, formData[fieldName]);
+          if (!fieldValid) {
+            isValid = false;
+          }
+        });
+        
+        return isValid;
+      }
+
+      /**
+       * Validate individual field
+       * @private
+       * @param {string} fieldName - Field name
+       * @param {any} value - Field value
+       * @returns {boolean} Whether field is valid
+       */
+      validateField(fieldName, value) {
+        const config = this.getFieldConfiguration(fieldName);
+        const isRequired = this.sheetMapper.getRequiredFields().includes(fieldName);
+        
+        // Required field validation
+        if (isRequired && (!value || value.toString().trim() === '')) {
+          this.setFieldError(fieldName, `${config.label} is required`);
+          return false;
+        }
+        
+        // Use SheetMapper validation
+        const sheetValidation = this.sheetMapper.validateField(fieldName, value);
+        if (!sheetValidation.isValid) {
+          this.setFieldError(fieldName, sheetValidation.error);
+          return false;
+        }
+        
+        this.clearFieldError(fieldName);
+        return true;
+      }
+
+      /**
+       * Set field error state
+       * @private
+       * @param {string} fieldName - Field name
+       * @param {string} errorMessage - Error message
+       */
+      setFieldError(fieldName, errorMessage) {
+        this.validationErrors[fieldName] = errorMessage;
+        
+        const fieldWrapper = document.querySelector(`[data-field="${fieldName}"]`);
+        if (fieldWrapper) {
+          // Show error message
+          let errorElement = fieldWrapper.querySelector('.field-error');
+          if (!errorElement) {
+            errorElement = document.createElement('div');
+            errorElement.className = 'field-error';
+            fieldWrapper.appendChild(errorElement);
+          }
+          errorElement.textContent = errorMessage;
+          errorElement.style.display = 'block';
+          errorElement.style.color = 'red';
+          errorElement.style.fontSize = '12px';
+          errorElement.style.marginTop = '4px';
+        }
+      }
+
+      /**
+       * Clear field error state
+       * @private
+       * @param {string} fieldName - Field name
+       */
+      clearFieldError(fieldName) {
+        delete this.validationErrors[fieldName];
+        
+        const fieldWrapper = document.querySelector(`[data-field="${fieldName}"]`);
+        if (fieldWrapper) {
+          const errorElement = fieldWrapper.querySelector('.field-error');
+          if (errorElement) {
+            errorElement.style.display = 'none';
+          }
+        }
+      }
+
+      /**
+       * Show validation errors summary
+       * @private
+       */
+      showValidationErrors() {
+        const errorCount = Object.keys(this.validationErrors).length;
+        const message = `Please fix ${errorCount} error${errorCount > 1 ? 's' : ''} before submitting.`;
+        
+        alert(message);
+      }
+
+      /**
+       * Initialize Material Design Components (simplified version)
+       * @private
+       * @param {HTMLElement} form - Form element
+       */
+      initializeMDCComponents(form) {
+        // For now, we'll use simple HTML elements
+        // In a full implementation, this would initialize proper MDC components
+        console.log('Initializing form components for:', form.id);
+      }
+
+      /**
+       * Create error element for display
+       * @private
+       * @param {string} message - Error message
+       * @returns {HTMLElement} Error element
+       */
+      createErrorElement(message) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'casesdash-form__error-state';
+        errorDiv.innerHTML = `
+          <h3>Error</h3>
+          <p>${message}</p>
+        `;
+        
+        return errorDiv;
+      }
+    }
+
+    // Export CasesDashFormGenerator class
+    return {
+      CasesDashFormGenerator: CasesDashFormGenerator
+    };
+
+  })();
+
+  // Global alias for backward compatibility
+  if (typeof window.FormGenerator === 'undefined') {
+    window.FormGenerator = window.CasesDashFormGenerator.CasesDashFormGenerator;
+  }
+}
+</script>

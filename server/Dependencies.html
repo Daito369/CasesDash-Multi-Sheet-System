@@ -1,0 +1,123 @@
+<script>
+/**
+ * CasesDash - Core Dependencies
+ * Essential dependencies and configurations for the CasesDash application
+ * 
+ * @author Roo
+ * @version 1.0
+ * @since 2025-05-29
+ */
+
+console.log('🔧 Loading CasesDash Dependencies...');
+
+// Note: This file provides compatibility layer and basic error handling
+// The main implementations are in separate dedicated files:
+// - ConfigManager.js: Complete configuration management
+// - ErrorHandler.js: Comprehensive error handling
+// - PrivacyManager.js: Privacy and security management
+
+/**
+ * Basic error logging for fallback scenarios
+ */
+function logError(message, context = {}) {
+  console.error('CasesDash Error:', message, context);
+  
+  try {
+    // Try to use the full ErrorHandler if available
+    if (typeof ErrorHandler !== 'undefined' && ErrorHandler.logError) {
+      ErrorHandler.logError(message, context);
+    }
+  } catch (e) {
+    // Fallback logging
+    console.error('Fallback error logging:', message);
+  }
+}
+
+/**
+ * Basic configuration access for compatibility
+ */
+function getConfig(category, key) {
+  try {
+    // Try to use the full ConfigManager if available
+    if (typeof ConfigManager !== 'undefined' && ConfigManager.get) {
+      return ConfigManager.get(category, key);
+    }
+  } catch (e) {
+    logError('Config access failed', { category, key, error: e.message });
+  }
+  
+  return null;
+}
+
+/**
+ * Initialize dependencies
+ */
+function initializeDependencies() {
+  try {
+    console.log('🔧 Initializing CasesDash Dependencies...');
+    
+    // Check if main classes are available
+    var available = {
+      ConfigManager: typeof ConfigManager !== 'undefined',
+      ErrorHandler: typeof ErrorHandler !== 'undefined',
+      PrivacyManager: typeof PrivacyManager !== 'undefined'
+    };
+    
+    console.log('📋 Available components:', available);
+    
+    // Initialize ConfigManager if available
+    if (available.ConfigManager && ConfigManager.initialize) {
+      ConfigManager.initialize();
+      console.log('✅ ConfigManager initialized');
+    }
+    
+    console.log('✅ Dependencies initialization complete');
+    return true;
+    
+  } catch (error) {
+    console.error('❌ Dependencies initialization failed:', error);
+    logError('Dependencies initialization failed', { error: error.message });
+    return false;
+  }
+}
+
+/**
+ * Get system status
+ */
+function getSystemStatus() {
+  try {
+    return {
+      timestamp: new Date().toISOString(),
+      components: {
+        ConfigManager: typeof ConfigManager !== 'undefined',
+        ErrorHandler: typeof ErrorHandler !== 'undefined',
+        PrivacyManager: typeof PrivacyManager !== 'undefined'
+      },
+      version: '1.0.0',
+      status: 'operational'
+    };
+  } catch (error) {
+    logError('System status check failed', { error: error.message });
+    return {
+      timestamp: new Date().toISOString(),
+      status: 'error',
+      error: error.message
+    };
+  }
+}
+
+// Export functions for global access
+window.logError = logError;
+window.getConfig = getConfig;
+window.initializeDependencies = initializeDependencies;
+window.getSystemStatus = getSystemStatus;
+
+// Initialize dependencies when DOM is ready
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeDependencies);
+} else {
+  setTimeout(initializeDependencies, 100);
+}
+
+console.log('✅ CasesDash Dependencies loaded successfully');
+</script>

@@ -1,0 +1,1080 @@
+<script>
+/**
+ * CasesDash Dashboard Manager
+ * 仕様書準拠のアクティブケース一覧表示とリアルタイム管理を担当
+ * 
+ * 主要機能:
+ * - アクティブケース("Assigned"ステータス)の表示
+ * - リアルタイムタイマー更新（TRT & P95）
+ * - シート別カラーコーディング
+ * - ケースカードインタラクション
+ * - フィルタリング機能
+ * 
+ * @author CasesDash Development Team
+ * @version 2.0.0
+ */
+
+// GAS環境での安全なwindowオブジェクト参照
+(function(global) {
+    'use strict';
+    
+    // サーバーサイドでwindowが存在しない場合のガード
+    if (typeof global === 'undefined') {
+        console.log('⚠️ Global object not available, skipping DashboardManager initialization');
+        return;
+    }
+    
+    global.CasesDashDashboardManager = (function() {
+        'use strict';
+        
+        // モジュール設定
+        const CONFIG = {
+            UPDATE_INTERVAL: 1000,              // 1秒間隔でタイマー更新
+            CRITICAL_THRESHOLD: 2 * 60 * 60,    // 2時間（秒）
+            WARNING_THRESHOLD: 3 * 60 * 60,     // 3時間（秒）
+            P95_TARGET_HOURS: 72,               // P95目標：72時間
+            
+            // シート別カラーコーディング（仕様書準拠）
+            SHEET_COLORS: {
+                'OT Email': { color: '#4285F4', border: 'solid', name: 'Google Blue' },
+                '3PO Email': { color: '#34A853', border: 'dashed', name: 'Google Green' },
+                'OT Chat': { color: '#FBBC05', border: 'solid', name: 'Google Yellow' },
+                '3PO Chat': { color: '#EA4335', border: 'dashed', name: 'Google Red' },
+                'OT Phone': { color: '#8430CE', border: 'solid', name: 'Google Purple' },
+                '3PO Phone': { color: '#F57C00', border: 'dashed', name: 'Google Orange' }
+            },
+            
+            // TRT時間設定（仕様書準拠）
+            TRT_HOURS: {
+                'Email': 36,    // 36時間
+                'Chat': 8,      // 8時間  
+                'Phone': 8      // 8時間
+            }
+        };
+        
+        // プライベート変数
+        let activeCases = [];
+        let timerInterval = null;
+        let currentFilters = {
+            sheet: 'all',
+            channel: 'all',
+            segment: 'all',
+            urgency: 'all'
+        };
+        
+        /**
+         * ダッシュボードマネージャーを初期化
+         */
+        function initialize() {
+            console.log('🚀 Initializing Dashboard Manager...');
+            
+            try {
+                // クライアントサイドでのみ実行
+                if (typeof global.document !== 'undefined') {
+                    setupUI();
+                    loadActiveCases();
+                    startRealtimeUpdates();
+                    setupEventListeners();
+                }
+                
+                console.log('✅ Dashboard Manager initialized successfully');
+            } catch (error) {
+                console.error('❌ Failed to initialize Dashboard Manager:', error);
+                showError('ダッシュボードの初期化に失敗しました');
+            }
+        }
+        
+        /**
+         * UIコンポーネントのセットアップ
+         */
+        function setupUI() {
+            console.log('🎨 Setting up Dashboard UI components...');
+            
+            if (typeof global.document === 'undefined') return;
+            
+            // フィルターコントロールの追加
+            addFilterControls();
+            
+            // ケース表示エリアの準備
+            prepareActiveCasesArea();
+            
+            // 統計カードの拡張
+            enhanceStatsCards();
+        }
+        
+        /**
+         * フィルターコントロールをダッシュボードに追加
+         */
+        function addFilterControls() {
+            if (typeof global.document === 'undefined') return;
+            
+            const dashboardView = global.document.getElementById('dashboard-view');
+            if (!dashboardView) return;
+            
+            // フィルターコントロールが既に存在する場合はスキップ
+            if (global.document.getElementById('dashboard-filters')) return;
+            
+            const filterControlsHtml = `
+                <div id="dashboard-filters" class="dashboard-filters" style="margin-bottom: var(--md-space-6);">
+                    <div class="dashboard-card">
+                        <div class="card-header">
+                            <h3 class="card-title">Active Cases Filters</h3>
+                            <div class="card-actions">
+                                <button class="btn btn-icon" onclick="CasesDashDashboardManager.resetFilters()" title="Reset Filters">
+                                    <span class="material-symbols-outlined">filter_alt_off</span>
+                                </button>
+                                <button class="btn btn-icon" onclick="CasesDashDashboardManager.refreshActiveCases()" title="Refresh">
+                                    <span class="material-symbols-outlined">refresh</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="filter-controls-grid">
+                                <div class="filter-group">
+                                    <label for="sheet-filter">Sheet</label>
+                                    <select id="sheet-filter" class="filter-select">
+                                        <option value="all">All Sheets</option>
+                                        <option value="OT Email">OT Email</option>
+                                        <option value="3PO Email">3PO Email</option>
+                                        <option value="OT Chat">OT Chat</option>
+                                        <option value="3PO Chat">3PO Chat</option>
+                                        <option value="OT Phone">OT Phone</option>
+                                        <option value="3PO Phone">3PO Phone</option>
+                                    </select>
+                                </div>
+                                <div class="filter-group">
+                                    <label for="channel-filter">Channel</label>
+                                    <select id="channel-filter" class="filter-select">
+                                        <option value="all">All Channels</option>
+                                        <option value="Email">Email</option>
+                                        <option value="Chat">Chat</option>
+                                        <option value="Phone">Phone</option>
+                                    </select>
+                                </div>
+                                <div class="filter-group">
+                                    <label for="segment-filter">Segment</label>
+                                    <select id="segment-filter" class="filter-select">
+                                        <option value="all">All Segments</option>
+                                        <option value="Platinum">Platinum</option>
+                                        <option value="Titanium">Titanium</option>
+                                        <option value="Gold">Gold</option>
+                                        <option value="Silver">Silver</option>
+                                        <option value="Bronze - Low">Bronze - Low</option>
+                                        <option value="Bronze - High">Bronze - High</option>
+                                    </select>
+                                </div>
+                                <div class="filter-group">
+                                    <label for="urgency-filter">Urgency</label>
+                                    <select id="urgency-filter" class="filter-select">
+                                        <option value="all">All Urgency</option>
+                                        <option value="critical">Critical (≤2h)</option>
+                                        <option value="warning">Warning (≤3h)</option>
+                                        <option value="normal">Normal (>3h)</option>
+                                        <option value="missed">Missed</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            
+            // 既存のダッシュボードグリッドの前に挿入
+            const dashboardGrid = dashboardView.querySelector('.dashboard-grid');
+            if (dashboardGrid) {
+                dashboardGrid.insertAdjacentHTML('beforebegin', filterControlsHtml);
+            }
+        }
+        
+        /**
+         * アクティブケース表示エリアの準備
+         */
+        function prepareActiveCasesArea() {
+            if (typeof global.document === 'undefined') return;
+            
+            const dashboardGrid = global.document.querySelector('#dashboard-view .dashboard-grid');
+            if (!dashboardGrid) return;
+            
+            // アクティブケースエリアが既に存在する場合はスキップ
+            if (global.document.getElementById('active-cases-section')) return;
+            
+            const activeCasesHtml = `
+                <div class="grid-col-12" id="active-cases-section">
+                    <div class="dashboard-card">
+                        <div class="card-header">
+                            <div>
+                                <h3 class="card-title">Active Cases</h3>
+                                <p class="card-subtitle">Cases with "Assigned" status</p>
+                            </div>
+                            <div class="card-actions">
+                                <span id="active-cases-count" class="cases-count-badge">0</span>
+                                <button class="btn btn-icon" onclick="CasesDashDashboardManager.toggleView()" title="Toggle View">
+                                    <span class="material-symbols-outlined">view_module</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="active-cases-container" class="active-cases-grid">
+                                <div class="loading-state">
+                                    <div class="loading-spinner"></div>
+                                    <span>Loading active cases...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>`;
+            
+            // Recent Activityセクションの前に挿入
+            const recentActivitySection = dashboardGrid.querySelector('.grid-col-12:last-child');
+            if (recentActivitySection) {
+                recentActivitySection.insertAdjacentHTML('beforebegin', activeCasesHtml);
+            } else {
+                dashboardGrid.insertAdjacentHTML('beforeend', activeCasesHtml);
+            }
+        }
+        
+        /**
+         * 統計カードの機能強化
+         */
+        function enhanceStatsCards() {
+            if (typeof global.document === 'undefined') return;
+            
+            // リアルタイム更新のための準備
+            const statsCards = global.document.querySelectorAll('.stats-card');
+            statsCards.forEach(card => {
+                card.addEventListener('click', function() {
+                    const cardTitle = this.querySelector('.card-title')?.textContent;
+                    if (cardTitle) {
+                        applyQuickFilter(cardTitle);
+                    }
+                });
+            });
+        }
+        
+        /**
+         * アクティブケースを読み込み
+         */
+        async function loadActiveCases() {
+            console.log('📋 Loading active cases...');
+            
+            try {
+                showLoadingState();
+                
+                // 実際のGAS API呼び出し
+                const response = await callServerFunction('getActiveCases');
+                console.log('🔍 Server response structure:', response);
+                
+                // レスポンス構造の正規化
+                let extractedCases = [];
+                if (response && response.success && typeof response.data === 'string') {
+                    try {
+                        extractedCases = JSON.parse(response.data);
+                    } catch (parseError) {
+                        console.error('❌ Failed to parse response data:', parseError);
+                        extractedCases = [];
+                    }
+                } else if (Array.isArray(response)) {
+                    extractedCases = response; // Fallback for direct array response (e.g., mock data)
+                } else {
+                    console.warn('⚠️ Unexpected response format:', response);
+                    extractedCases = [];
+                }
+                
+                activeCases = extractedCases;
+                console.log('🔍 Extracted active cases:', activeCases);
+                console.log('🔍 Is array?', Array.isArray(activeCases));
+                console.log(`✅ Loaded ${activeCases.length} active cases`);
+                console.log('🔍 Sample case:', activeCases[0]);
+                
+                // データが配列であることを確認
+                if (!Array.isArray(activeCases)) {
+                    throw new Error('Active cases data is not an array');
+                }
+                
+                renderActiveCases();
+                updateStatistics();
+                
+            } catch (error) {
+                console.error('❌ Failed to load active cases:', error);
+                showError('アクティブケースの読み込みに失敗しました');
+                
+                // フォールバック: デモモードでモックデータを使用
+                console.log('🔄 Falling back to demo data...');
+                try {
+                    const demoData = generateMockData();
+                    activeCases = demoData || [];
+                    renderActiveCases();
+                    updateStatistics();
+                    showDemoNotice();
+                } catch (demoError) {
+                    console.error('❌ Demo data fallback failed:', demoError);
+                    showEmptyState('データの読み込みに失敗しました');
+                }
+            }
+        }
+        
+        /**
+         * GASサーバー関数を安全に呼び出し
+         * @param {string} functionName - 呼び出すGAS関数名
+         * @param {...any} args - 関数の引数
+         * @returns {Promise} - 結果のPromise
+         */
+        function callServerFunction(functionName, ...args) {
+            return new Promise((resolve, reject) => {
+                if (typeof google !== 'undefined' && google.script && google.script.run) {
+                    google.script.run
+                        .withSuccessHandler(resolve)
+                        .withFailureHandler(reject)
+                        [functionName](...args);
+                } else {
+                    reject(new Error('Google Apps Script environment not available'));
+                }
+            });
+        }
+        
+        /**
+         * デモ用のモックデータ生成
+         */
+        function generateMockData() {
+            const sheets = ['OT Email', '3PO Email', 'OT Chat', '3PO Chat', 'OT Phone', '3PO Phone'];
+            const segments = ['Platinum', 'Titanium', 'Gold', 'Silver', 'Bronze - Low', 'Bronze - High'];
+            const categories = ['Search', 'Display', 'Video', 'Commerce', 'Apps', 'Policy', 'Billing'];
+            const assignees = ['tanaka', 'suzuki', 'sato', 'yamada', 'watanabe'];
+            
+            const mockCases = [];
+            
+            for (let i = 0; i < 15; i++) {
+                const sheet = sheets[Math.floor(Math.random() * sheets.length)];
+                const openTime = new Date(Date.now() - Math.random() * 24 * 60 * 60 * 1000); // 最大24時間前
+                
+                mockCases.push({
+                    caseId: `${Math.floor(Math.random() * 9)}-${Date.now().toString().slice(-10)}${i.toString().padStart(3, '0')}`,
+                    sheetName: sheet,
+                    caseOpenDate: openTime.toLocaleDateString('ja-JP'),
+                    caseOpenTime: openTime.toLocaleTimeString('ja-JP'),
+                    incomingSegment: segments[Math.floor(Math.random() * segments.length)],
+                    productCategory: categories[Math.floor(Math.random() * categories.length)],
+                    firstAssignee: assignees[Math.floor(Math.random() * assignees.length)],
+                    finalAssignee: assignees[Math.floor(Math.random() * assignees.length)],
+                    caseStatus: 'Assigned',
+                    bug: Math.random() > 0.8 ? '1' : '0',
+                    tsConsulted: Math.random() > 0.9 ? '1' : '0',
+                    idtBlocked: Math.random() > 0.9 ? '1' : '0',
+                    payreqBlocked: Math.random() > 0.9 ? '1' : '0'
+                });
+            }
+            
+            return mockCases;
+        }
+        
+        /**
+         * アクティブケースを画面に描画
+         */
+        function renderActiveCases() {
+            if (typeof global.document === 'undefined') return;
+            
+            const container = global.document.getElementById('active-cases-container');
+            if (!container) return;
+            
+            // フィルタリング適用
+            const filteredCases = applyFilters(activeCases);
+            
+            // ケース数更新
+            updateCaseCount(filteredCases.length);
+            
+            if (filteredCases.length === 0) {
+                showEmptyState('フィルター条件に一致するケースがありません');
+                return;
+            }
+            
+            // ケースカードを生成
+            const casesHtml = filteredCases.map(caseData => createCaseCard(caseData)).join('');
+            container.innerHTML = casesHtml;
+            
+            console.log(`📋 Rendered ${filteredCases.length} case cards`);
+        }
+        
+        /**
+         * ケースカードのHTMLを生成
+         */
+        function createCaseCard(caseData) {
+            const sheetConfig = CONFIG.SHEET_COLORS[caseData.sheetName] || CONFIG.SHEET_COLORS['OT Email'];
+            const channel = getChannelFromSheet(caseData.sheetName);
+            const trtHours = CONFIG.TRT_HOURS[channel] || 8;
+            
+            // タイマー計算
+            const timers = calculateTimers(caseData, trtHours);
+            
+            // 緊急度クラス
+            const urgencyClass = getUrgencyClass(timers.trtRemaining);
+            
+            // 除外ケースの表示
+            const exclusionStatus = getExclusionStatus(caseData);
+            
+            return `
+                <div class="case-card ${urgencyClass}" 
+                     data-case-id="${escapeHtml(caseData.caseId)}"
+                     data-sheet="${escapeHtml(caseData.sheetName)}"
+                     data-channel="${escapeHtml(channel)}"
+                     data-segment="${escapeHtml(caseData.incomingSegment)}"
+                     style="border-left: 4px ${sheetConfig.border} ${sheetConfig.color};">
+                    
+                    <div class="case-card-header">
+                        <div class="case-badges">
+                            <span class="sheet-badge" style="background-color: ${sheetConfig.color};">
+                                ${escapeHtml(caseData.sheetName)}
+                            </span>
+                            <span class="channel-icon" title="${channel}">
+                                <span class="material-symbols-outlined">
+                                    ${getChannelIcon(channel)}
+                                </span>
+                            </span>
+                        </div>
+                        <div class="case-actions">
+                            <button class="btn btn-icon" onclick="CasesDashDashboardManager.editCase('${escapeHtml(caseData.caseId)}')" title="Edit">
+                                <span class="material-symbols-outlined">edit</span>
+                            </button>
+                            <button class="btn btn-icon" onclick="CasesDashDashboardManager.deleteCase('${escapeHtml(caseData.caseId)}')" title="Delete">
+                                <span class="material-symbols-outlined">delete</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="case-card-body" onclick="CasesDashDashboardManager.showCaseDetails('${escapeHtml(caseData.caseId)}')">
+                        <div class="case-id">
+                            <strong>Case ID:</strong> ${escapeHtml(caseData.caseId)}
+                        </div>
+                        <div class="case-info-grid">
+                            <div class="info-item">
+                                <span class="label">Assignee:</span>
+                                <span class="value">${escapeHtml(caseData.finalAssignee || caseData.firstAssignee || 'Unassigned')}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">Segment:</span>
+                                <span class="value">${escapeHtml(caseData.incomingSegment)}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">Category:</span>
+                                <span class="value">${escapeHtml(caseData.productCategory)}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">Status:</span>
+                                <span class="value status-assigned">${escapeHtml(caseData.caseStatus)}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="case-timers">
+                            <div class="timer-item">
+                                <span class="timer-label">TRT Timer:</span>
+                                <span class="timer-value trt-timer ${getTimerClass(timers.trtRemaining)}" 
+                                      data-remaining="${timers.trtRemaining}">
+                                    ${formatTimer(timers.trtRemaining)}
+                                </span>
+                            </div>
+                            <div class="timer-item">
+                                <span class="timer-label">P95 Timer:</span>
+                                <span class="timer-value p95-timer ${getTimerClass(timers.p95Remaining)}" 
+                                      data-remaining="${timers.p95Remaining}">
+                                    ${formatP95Timer(timers.p95Remaining)}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="case-card-footer">
+                        <div class="exclusion-controls">
+                            ${createExclusionControls(caseData, exclusionStatus)}
+                        </div>
+                    </div>
+                    
+                    ${exclusionStatus.isExcluded ? '<div class="exclusion-indicator">Excluded!!</div>' : ''}
+                </div>`;
+        }
+        
+        /**
+         * タイマー計算（TRT & P95）
+         */
+        function calculateTimers(caseData, trtHours) {
+            const now = new Date();
+            const openDateTime = new Date(`${caseData.caseOpenDate} ${caseData.caseOpenTime}`);
+            
+            // 経過時間（秒）
+            const elapsedSeconds = Math.floor((now - openDateTime) / 1000);
+            
+            // TRT残り時間
+            const trtTargetSeconds = trtHours * 60 * 60;
+            const trtRemaining = trtTargetSeconds - elapsedSeconds;
+            
+            // P95残り時間（72時間）
+            const p95TargetSeconds = CONFIG.P95_TARGET_HOURS * 60 * 60;
+            const p95Remaining = p95TargetSeconds - elapsedSeconds;
+            
+            return {
+                trtRemaining: trtRemaining,
+                p95Remaining: p95Remaining,
+                elapsed: elapsedSeconds
+            };
+        }
+        
+        /**
+         * 除外ステータスの確認
+         */
+        function getExclusionStatus(caseData) {
+            const exclusions = [];
+            let isExcluded = false;
+            
+            // 全セグメント共通の除外条件
+            if (caseData.bug && caseData.bug !== '0') {
+                exclusions.push('Bug Case');
+                isExcluded = true;
+            }
+            
+            // セグメント固有の除外条件
+            if (caseData.incomingSegment === 'Policy' && caseData.tsConsulted && caseData.tsConsulted !== '0') {
+                exclusions.push('T&S Consulted');
+                isExcluded = true;
+            }
+            
+            if (caseData.incomingSegment === 'Billing') {
+                if (caseData.idtBlocked && caseData.idtBlocked !== '0') {
+                    exclusions.push('IDT Blocked');
+                    isExcluded = true;
+                }
+                if (caseData.payreqBlocked && caseData.payreqBlocked !== '0') {
+                    exclusions.push('Payreq Blocked');
+                    isExcluded = true;
+                }
+            }
+            
+            return {
+                isExcluded: isExcluded,
+                exclusions: exclusions
+            };
+        }
+        
+        /**
+         * 除外コントロールのHTML生成
+         */
+        function createExclusionControls(caseData, exclusionStatus) {
+            const segment = caseData.incomingSegment;
+            let controls = [];
+            
+            // Bug Case（全セグメント共通）
+            const bugChecked = caseData.bug && caseData.bug !== '0' ? 'checked' : '';
+            controls.push(`
+                <label class="exclusion-toggle">
+                    <input type="checkbox" ${bugChecked} onchange="CasesDashDashboardManager.toggleExclusion('${caseData.caseId}', 'bug', this.checked)">
+                    <span>Bug</span>
+                </label>
+            `);
+            
+            // L2 Consulted（全セグメント共通）
+            const l2Checked = caseData.l2Consulted && caseData.l2Consulted !== '0' ? 'checked' : '';
+            controls.push(`
+                <label class="exclusion-toggle">
+                    <input type="checkbox" ${l2Checked} onchange="CasesDashDashboardManager.toggleExclusion('${caseData.caseId}', 'l2Consulted', this.checked)">
+                    <span>L2</span>
+                </label>
+            `);
+            
+            // Policy特有
+            if (segment === 'Policy') {
+                const tsChecked = caseData.tsConsulted && caseData.tsConsulted !== '0' ? 'checked' : '';
+                controls.push(`
+                    <label class="exclusion-toggle">
+                        <input type="checkbox" ${tsChecked} onchange="CasesDashDashboardManager.toggleExclusion('${caseData.caseId}', 'tsConsulted', this.checked)">
+                        <span>T&S</span>
+                    </label>
+                `);
+            }
+            
+            // Billing特有
+            if (segment === 'Billing') {
+                const idtChecked = caseData.idtBlocked && caseData.idtBlocked !== '0' ? 'checked' : '';
+                const payreqChecked = caseData.payreqBlocked && caseData.payreqBlocked !== '0' ? 'checked' : '';
+                
+                controls.push(`
+                    <label class="exclusion-toggle">
+                        <input type="checkbox" ${idtChecked} onchange="CasesDashDashboardManager.toggleExclusion('${caseData.caseId}', 'idtBlocked', this.checked)">
+                        <span>IDT</span>
+                    </label>
+                `);
+                
+                controls.push(`
+                    <label class="exclusion-toggle">
+                        <input type="checkbox" ${payreqChecked} onchange="CasesDashDashboardManager.toggleExclusion('${caseData.caseId}', 'payreqBlocked', this.checked)">
+                        <span>Payreq</span>
+                    </label>
+                `);
+            }
+            
+            return controls.join('');
+        }
+        
+        /**
+         * リアルタイム更新を開始
+         */
+        function startRealtimeUpdates() {
+            if (typeof global.document === 'undefined') return;
+            
+            if (timerInterval) {
+                clearInterval(timerInterval);
+            }
+            
+            timerInterval = setInterval(() => {
+                updateTimers();
+                checkCriticalCases();
+            }, CONFIG.UPDATE_INTERVAL);
+            
+            console.log('⏰ Started realtime timer updates');
+        }
+        
+        /**
+         * タイマー表示を更新
+         */
+        function updateTimers() {
+            if (typeof global.document === 'undefined') return;
+            
+            const timerElements = global.document.querySelectorAll('.timer-value');
+            
+            timerElements.forEach(timer => {
+                const remaining = parseInt(timer.dataset.remaining);
+                if (isNaN(remaining)) return;
+                
+                // 経過時間分を減算
+                const newRemaining = remaining - 1;
+                timer.dataset.remaining = newRemaining;
+                
+                // 表示更新
+                if (timer.classList.contains('p95-timer')) {
+                    timer.textContent = formatP95Timer(newRemaining);
+                } else {
+                    timer.textContent = formatTimer(newRemaining);
+                }
+                
+                // クラス更新
+                timer.className = timer.className.replace(/(timer-normal|timer-warning|timer-critical|timer-missed)/g, '');
+                timer.classList.add(getTimerClass(newRemaining));
+            });
+        }
+        
+        /**
+         * 緊急ケースのチェックと通知
+         */
+        function checkCriticalCases() {
+            const criticalCases = activeCases.filter(caseData => {
+                const timers = calculateTimers(caseData, CONFIG.TRT_HOURS[getChannelFromSheet(caseData.sheetName)] || 8);
+                return timers.p95Remaining <= CONFIG.CRITICAL_THRESHOLD && timers.p95Remaining > 0;
+            });
+            
+            if (criticalCases.length > 0) {
+                // 通知送信（実装は後で）
+                console.warn(`⚠️ ${criticalCases.length} critical cases found`);
+            }
+        }
+        
+        /**
+         * フィルターを適用
+         */
+        function applyFilters(cases) {
+            return cases.filter(caseData => {
+                // シートフィルター
+                if (currentFilters.sheet !== 'all' && caseData.sheetName !== currentFilters.sheet) {
+                    return false;
+                }
+                
+                // チャネルフィルター
+                if (currentFilters.channel !== 'all') {
+                    const channel = getChannelFromSheet(caseData.sheetName);
+                    if (channel !== currentFilters.channel) {
+                        return false;
+                    }
+                }
+                
+                // セグメントフィルター
+                if (currentFilters.segment !== 'all' && caseData.incomingSegment !== currentFilters.segment) {
+                    return false;
+                }
+                
+                // 緊急度フィルター
+                if (currentFilters.urgency !== 'all') {
+                    const timers = calculateTimers(caseData, CONFIG.TRT_HOURS[getChannelFromSheet(caseData.sheetName)] || 8);
+                    const urgency = getUrgencyLevel(timers.trtRemaining);
+                    if (urgency !== currentFilters.urgency) {
+                        return false;
+                    }
+                }
+                
+                return true;
+            });
+        }
+        
+        /**
+         * イベントリスナーの設定
+         */
+        function setupEventListeners() {
+            if (typeof global.document === 'undefined') return;
+            
+            // フィルターコントロールのイベント
+            ['sheet-filter', 'channel-filter', 'segment-filter', 'urgency-filter'].forEach(filterId => {
+                const filterElement = global.document.getElementById(filterId);
+                if (filterElement) {
+                    filterElement.addEventListener('change', handleFilterChange);
+                }
+            });
+        }
+        
+        /**
+         * フィルター変更ハンドラー
+         */
+        function handleFilterChange(event) {
+            const filterId = event.target.id;
+            const filterValue = event.target.value;
+            
+            switch (filterId) {
+                case 'sheet-filter':
+                    currentFilters.sheet = filterValue;
+                    break;
+                case 'channel-filter':
+                    currentFilters.channel = filterValue;
+                    break;
+                case 'segment-filter':
+                    currentFilters.segment = filterValue;
+                    break;
+                case 'urgency-filter':
+                    currentFilters.urgency = filterValue;
+                    break;
+            }
+            
+            console.log('🔍 Filter applied:', filterId, '=', filterValue);
+            renderActiveCases();
+        }
+        
+        /**
+         * ユーティリティ関数群
+         */
+        function getChannelFromSheet(sheetName) {
+            if (sheetName.includes('Email')) return 'Email';
+            if (sheetName.includes('Chat')) return 'Chat';
+            if (sheetName.includes('Phone')) return 'Phone';
+            return 'Unknown';
+        }
+        
+        function getChannelIcon(channel) {
+            switch (channel) {
+                case 'Email': return 'email';
+                case 'Chat': return 'chat';
+                case 'Phone': return 'phone';
+                default: return 'help';
+            }
+        }
+        
+        function getUrgencyClass(remainingSeconds) {
+            if (remainingSeconds <= 0) return 'case-missed';
+            if (remainingSeconds <= CONFIG.CRITICAL_THRESHOLD) return 'case-critical';
+            if (remainingSeconds <= CONFIG.WARNING_THRESHOLD) return 'case-warning';
+            return 'case-normal';
+        }
+        
+        function getUrgencyLevel(remainingSeconds) {
+            if (remainingSeconds <= 0) return 'missed';
+            if (remainingSeconds <= CONFIG.CRITICAL_THRESHOLD) return 'critical';
+            if (remainingSeconds <= CONFIG.WARNING_THRESHOLD) return 'warning';
+            return 'normal';
+        }
+        
+        function getTimerClass(remainingSeconds) {
+            if (remainingSeconds <= 0) return 'timer-missed';
+            if (remainingSeconds <= CONFIG.CRITICAL_THRESHOLD) return 'timer-critical';
+            if (remainingSeconds <= CONFIG.WARNING_THRESHOLD) return 'timer-warning';
+            return 'timer-normal';
+        }
+        
+        function formatTimer(seconds) {
+            if (seconds <= 0) return 'Missed';
+            
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+        
+        function formatP95Timer(seconds) {
+            if (seconds <= 0) return 'Missed';
+            
+            const days = Math.floor(seconds / 86400);
+            const hours = Math.floor((seconds % 86400) / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = seconds % 60;
+            
+            if (days > 0) {
+                return `${days}日 ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            } else {
+                return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+        }
+        
+        function escapeHtml(text) {
+            if (typeof text !== 'string') return text;
+            if (typeof global.document === 'undefined') return text;
+            
+            const div = global.document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function showLoadingState() {
+            if (typeof global.document === 'undefined') return;
+            
+            const container = global.document.getElementById('active-cases-container');
+            if (container) {
+                container.innerHTML = `
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <span>Loading active cases...</span>
+                    </div>`;
+            }
+        }
+        
+        function showEmptyState(message = 'アクティブなケースがありません') {
+            if (typeof global.document === 'undefined') return;
+            
+            const container = global.document.getElementById('active-cases-container');
+            if (container) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <span class="material-symbols-outlined">inbox</span>
+                        <h4>No Active Cases</h4>
+                        <p>${escapeHtml(message)}</p>
+                    </div>`;
+            }
+        }
+        
+        function showError(message) {
+            // エラー通知の実装
+            console.error('Dashboard Error:', message);
+            if (global.showToast) {
+                global.showToast(message, 'error');
+            }
+        }
+        
+        function updateCaseCount(count) {
+            if (typeof global.document === 'undefined') return;
+            
+            const countBadge = global.document.getElementById('active-cases-count');
+            if (countBadge) {
+                countBadge.textContent = count;
+            }
+        }
+        
+        function updateStatistics() {
+            // 統計カードの更新
+            updateStatsCard('my-cases-count', activeCases.length);
+            
+            const openCases = activeCases.filter(c => c.caseStatus === 'Assigned');
+            updateStatsCard('open-cases-count', openCases.length);
+        }
+        
+        function updateStatsCard(elementId, value) {
+            if (typeof global.document === 'undefined') return;
+            
+            const element = global.document.getElementById(elementId);
+            if (element) {
+                element.textContent = value;
+            }
+        }
+        
+        function applyQuickFilter(cardTitle) {
+            // 統計カードクリック時のクイックフィルター
+            switch (cardTitle) {
+                case 'My Cases':
+                    // 自分のケースのみ表示
+                    break;
+                case 'Open Cases':
+                    // オープンケースのみ表示
+                    break;
+            }
+        }
+        
+        /**
+         * デモモード通知を表示
+         */
+        function showDemoNotice() {
+            if (typeof global.document === 'undefined') return;
+            
+            // 既存の通知を削除
+            const existingNotice = global.document.getElementById('demo-notice');
+            if (existingNotice) {
+                existingNotice.remove();
+            }
+            
+            const dashboardView = global.document.getElementById('dashboard-view');
+            if (!dashboardView) return;
+            
+            const noticeHtml = `
+                <div id="demo-notice" class="demo-notice" style="
+                    background: linear-gradient(90deg, #FFF3CD, #F8D7DA);
+                    border: 1px solid #FFEAA7;
+                    border-radius: var(--md-radius-2);
+                    padding: var(--md-space-4);
+                    margin-bottom: var(--md-space-4);
+                    display: flex;
+                    align-items: center;
+                    gap: var(--md-space-3);
+                ">
+                    <span class="material-symbols-outlined" style="color: #856404;">
+                        info
+                    </span>
+                    <div style="flex: 1;">
+                        <strong>デモモード:</strong>
+                        実際のデータベースに接続できませんでした。サンプルデータを表示しています。
+                    </div>
+                    <button class="btn btn-icon" onclick="this.parentElement.remove()" style="color: #856404;">
+                        <span class="material-symbols-outlined">close</span>
+                    </button>
+                </div>`;
+            
+            const firstChild = dashboardView.firstElementChild;
+            firstChild.insertAdjacentHTML('beforebegin', noticeHtml);
+        }
+        
+        // パブリックAPI
+        return {
+            initialize: initialize,
+            
+            // ケース管理
+            refreshActiveCases: loadActiveCases,
+            showCaseDetails: function(caseId) {
+                console.log('📋 Show case details:', caseId);
+                // ケース詳細モーダルの実装
+            },
+            
+            editCase: function(caseId) {
+                console.log('✏️ Edit case:', caseId);
+                // ケース編集モーダルの実装
+            },
+            
+            deleteCase: function(caseId) {
+                console.log('🗑️ Delete case:', caseId);
+                // ケース削除確認ダイアログの実装
+            },
+            
+            // 除外設定
+            toggleExclusion: function(caseId, exclusionType, isEnabled) {
+                console.log('🔄 Toggle exclusion:', caseId, exclusionType, isEnabled);
+                
+                // サーバーサイドで除外設定を更新
+                callServerFunction('updateCaseExclusion', caseId, exclusionType, isEnabled)
+                    .then(() => {
+                        console.log('✅ Exclusion updated successfully');
+                        // ローカルデータも更新
+                        const caseData = activeCases.find(c => c.caseId === caseId);
+                        if (caseData) {
+                            caseData[exclusionType] = isEnabled ? '1' : '0';
+                            renderActiveCases(); // 再描画
+                        }
+                    })
+                    .catch(error => {
+                        console.error('❌ Failed to update exclusion:', error);
+                        showError('除外設定の更新に失敗しました');
+                        
+                        // チェックボックスを元に戻す
+                        if (typeof global.document !== 'undefined') {
+                            const checkbox = global.document.querySelector(
+                                `input[onchange*="${caseId}"][onchange*="${exclusionType}"]`
+                            );
+                            if (checkbox) {
+                                checkbox.checked = !isEnabled;
+                            }
+                        }
+                    });
+            },
+            
+            // フィルター管理
+            resetFilters: function() {
+                currentFilters = { sheet: 'all', channel: 'all', segment: 'all', urgency: 'all' };
+                
+                if (typeof global.document !== 'undefined') {
+                    // フィルターUIをリセット
+                    ['sheet-filter', 'channel-filter', 'segment-filter', 'urgency-filter'].forEach(filterId => {
+                        const element = global.document.getElementById(filterId);
+                        if (element) element.value = 'all';
+                    });
+                }
+                
+                renderActiveCases();
+                console.log('🔄 Filters reset');
+            },
+            
+            // 表示切替
+            toggleView: function() {
+                if (typeof global.document === 'undefined') return;
+                
+                const container = global.document.getElementById('active-cases-container');
+                if (container) {
+                    container.classList.toggle('list-view');
+                    console.log('🔄 View toggled');
+                }
+            },
+            
+            // データ更新メソッド
+            updateCaseStatus: function(caseId, newStatus) {
+                return callServerFunction('updateCaseStatus', caseId, newStatus)
+                    .then(() => {
+                        console.log('✅ Case status updated:', caseId, newStatus);
+                        loadActiveCases(); // データを再読み込み
+                    })
+                    .catch(error => {
+                        console.error('❌ Failed to update case status:', error);
+                        showError('ケースステータスの更新に失敗しました');
+                    });
+            },
+            
+            // 手動リフレッシュ
+            forceRefresh: function() {
+                console.log('🔄 Force refreshing dashboard data...');
+                loadActiveCases();
+            },
+            
+            // 開発者用：デモモード切替
+            toggleDemoMode: function() {
+                const demoData = generateMockData();
+                activeCases = demoData;
+                renderActiveCases();
+                updateStatistics();
+                showDemoNotice();
+                console.log('🎭 Demo mode activated with mock data');
+            },
+            
+            // クリーンアップ
+            destroy: function() {
+                if (timerInterval) {
+                    clearInterval(timerInterval);
+                    timerInterval = null;
+                }
+                console.log('🧹 Dashboard Manager destroyed');
+            }
+        };
+    })();
+    
+    // グローバル関数として公開（後方互換性）
+    global.showDashboard = function() {
+        if (typeof global.document === 'undefined') return;
+        
+        const currentView = global.document.querySelector('.view-container:not([style*="display: none"])');
+        if (currentView && currentView.id !== 'dashboard-view') {
+            // 他の画面からダッシュボードに戻る場合は初期化
+            if (global.CasesDashDashboardManager) {
+                global.CasesDashDashboardManager.refreshActiveCases();
+            }
+        }
+        
+        if (global.showView) {
+            global.showView('dashboard');
+        }
+    };
+    
+    console.log('🚀 Dashboard Manager module loaded');
+    
+})(typeof window !== 'undefined' ? window : this);
+</script>

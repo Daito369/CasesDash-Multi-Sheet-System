@@ -1,0 +1,2012 @@
+<script>
+/**
+ * Case Manager - Core CRUD Operations
+ * Manages case creation, reading, updating, and deletion
+ * 
+ * @author Roo
+ * @version 1.0
+ * @since 2025-05-25
+ */
+
+if (typeof window !== 'undefined') {
+  window.CasesDashCaseManager = (function() {
+    'use strict';
+
+    // Case management state
+    let caseState = {
+      initialized: false,
+      currentCases: [],
+      filteredCases: [],
+      selectedCases: [],
+      searchQuery: '',
+      filterCriteria: {
+        status: '',
+        type: '',
+        assignee: '',
+        dateRange: null
+      },
+      sortCriteria: {
+        field: 'createdDate',
+        direction: 'desc'
+      },
+      pagination: {
+        currentPage: 1,
+        pageSize: 25,
+        totalPages: 1,
+        totalItems: 0
+      }
+    };
+
+    // DOM elements cache
+    let elements = {};
+
+    /**
+     * Initialize Case Manager
+     */
+    function initialize() {
+      try {
+        console.log('初期化中: ケースマネージャー...');
+        
+        cacheElements();
+        setupEventListeners();
+        setupDataTable();
+        
+        caseState.initialized = true;
+        console.log('✅ ケースマネージャーが正常に初期化されました');
+        
+      } catch (error) {
+        console.error('❌ ケースマネージャーの初期化に失敗:', error);
+        throw error;
+      }
+    }
+
+    /**
+     * Cache DOM elements for case management
+     */
+    function cacheElements() {
+      elements = {
+        // Case list view elements
+        casesTableBody: document.getElementById('cases-table-body'),
+        casesTable: document.getElementById('cases-table'),
+        caseSearchInput: document.getElementById('case-search'),
+        
+        // Filter controls
+        statusFilter: document.getElementById('status-filter'),
+        typeFilter: document.getElementById('type-filter'),
+        assigneeFilter: document.getElementById('assignee-filter'),
+        dateRangeFilter: document.getElementById('date-range-filter'),
+        
+        // Bulk actions
+        bulkActionsPanel: document.getElementById('bulk-actions-panel'),
+        selectAllCheckbox: document.getElementById('select-all-cases'),
+        bulkDeleteBtn: document.getElementById('bulk-delete-btn'),
+        bulkStatusBtn: document.getElementById('bulk-status-btn'),
+        bulkExportBtn: document.getElementById('bulk-export-btn'),
+        
+        // Pagination
+        paginationContainer: document.getElementById('pagination-container'),
+        itemsPerPageSelect: document.getElementById('items-per-page'),
+        
+        // Case detail modal
+        caseDetailModal: document.getElementById('case-detail-dialog'),
+        caseDetailContent: document.getElementById('case-detail-content'),
+        
+        // Quick actions
+        refreshCasesBtn: document.getElementById('refresh-cases-btn'),
+        exportCasesBtn: document.getElementById('export-cases-btn'),
+        
+        // Stats elements
+        totalCasesCount: document.getElementById('cases-count-total'),
+        activeCasesCount: document.getElementById('cases-count-active'),
+        completedCasesCount: document.getElementById('cases-count-completed')
+      };
+    }
+
+    /**
+     * Setup event listeners for case management
+     */
+    function setupEventListeners() {
+      // Search functionality
+      if (elements.caseSearchInput) {
+        elements.caseSearchInput.addEventListener('input', debounce(handleSearch, 300));
+      }
+
+      // Filter controls
+      if (elements.statusFilter) {
+        elements.statusFilter.addEventListener('change', handleFilterChange);
+      }
+      if (elements.typeFilter) {
+        elements.typeFilter.addEventListener('change', handleFilterChange);
+      }
+      if (elements.assigneeFilter) {
+        elements.assigneeFilter.addEventListener('change', handleFilterChange);
+      }
+      if (elements.dateRangeFilter) {
+        elements.dateRangeFilter.addEventListener('change', handleFilterChange);
+      }
+
+      // Bulk actions
+      if (elements.selectAllCheckbox) {
+        elements.selectAllCheckbox.addEventListener('change', handleSelectAll);
+      }
+      if (elements.bulkDeleteBtn) {
+        elements.bulkDeleteBtn.addEventListener('click', handleBulkDelete);
+      }
+      if (elements.bulkStatusBtn) {
+        elements.bulkStatusBtn.addEventListener('click', handleBulkStatusUpdate);
+      }
+      if (elements.bulkExportBtn) {
+        elements.bulkExportBtn.addEventListener('click', handleBulkExport);
+      }
+
+      // Pagination
+      if (elements.itemsPerPageSelect) {
+        elements.itemsPerPageSelect.addEventListener('change', handlePageSizeChange);
+      }
+
+      // Quick actions
+      if (elements.refreshCasesBtn) {
+        elements.refreshCasesBtn.addEventListener('click', refreshCasesList);
+      }
+      if (elements.exportCasesBtn) {
+        elements.exportCasesBtn.addEventListener('click', exportAllCases);
+      }
+    }
+
+    /**
+     * Setup data table with sorting and selection
+     */
+    function setupDataTable() {
+      if (!elements.casesTable) return;
+
+      // Setup sortable headers
+      const headers = elements.casesTable.querySelectorAll('th[data-sort]');
+      headers.forEach(header => {
+        header.addEventListener('click', () => handleSort(header.dataset.sort));
+        header.style.cursor = 'pointer';
+      });
+    }
+
+    /**
+     * Load user cases with current filters and pagination
+     */
+    async function loadUserCases() {
+      try {
+        showLoading(true);
+        
+        const requestParams = {
+          search: caseState.searchQuery,
+          filters: caseState.filterCriteria,
+          sort: caseState.sortCriteria,
+          pagination: caseState.pagination
+        };
+
+        const response = await callServerFunction('getUserCases', requestParams);
+        
+        if (response.success) {
+          caseState.currentCases = response.data.cases || [];
+          caseState.pagination = { ...caseState.pagination, ...response.data.pagination };
+          
+          updateCasesDisplay();
+          updatePagination();
+          updateCaseStats(response.data.stats);
+        } else {
+          throw new Error(response.error || 'ケースの読み込みに失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('ケース読み込みエラー:', error);
+        showError('ケースの読み込みに失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Update cases display in the table
+     */
+    function updateCasesDisplay() {
+      if (!elements.casesTableBody) return;
+
+      if (caseState.currentCases.length === 0) {
+        elements.casesTableBody.innerHTML = `
+          <tr>
+            <td colspan="6" class="no-cases-message">
+              <div style="text-align: center; padding: 20px; color: #666;">
+                <i class="material-icons" style="font-size: 48px; margin-bottom: 10px;">inbox</i>
+                <p>表示するケースがありません</p>
+                <button class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored" onclick="showCreateCase()">
+                  新しいケースを作成
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      const casesHTML = caseState.currentCases.map(caseItem => `
+        <tr data-case-id="${escapeHtml(caseItem.id)}" data-sheet-type="${escapeHtml(caseItem.sheetType)}">
+          <td>
+            <label class="mdl-checkbox mdl-js-checkbox mdl-checkbox--table-select" for="row-${caseItem.id}">
+              <input type="checkbox" id="row-${caseItem.id}" class="mdl-checkbox__input case-checkbox" 
+                     value="${escapeHtml(caseItem.id)}" onchange="handleCaseSelection(this)">
+            </label>
+          </td>
+          <td class="mdl-data-table__cell--non-numeric">
+            <a href="#" onclick="viewCaseDetails('${escapeHtml(caseItem.id)}', '${escapeHtml(caseItem.sheetType)}')" 
+               class="case-id-link">${escapeHtml(caseItem.caseId || caseItem.id)}</a>
+          </td>
+          <td class="mdl-data-table__cell--non-numeric">${escapeHtml(caseItem.sheetType || 'Unknown')}</td>
+          <td class="mdl-data-table__cell--non-numeric">
+            <span class="status-badge status-${(caseItem.status || 'unknown').toLowerCase()}">
+              ${escapeHtml(caseItem.status || 'Unknown')}
+            </span>
+          </td>
+          <td class="mdl-data-table__cell--non-numeric">${formatDate(caseItem.createdDate)}</td>
+          <td class="mdl-data-table__cell--non-numeric">
+            <div class="case-actions">
+              <button class="mdl-button mdl-js-button mdl-button--icon" 
+                      onclick="viewCaseDetails('${escapeHtml(caseItem.id)}', '${escapeHtml(caseItem.sheetType)}')"
+                      title="詳細表示">
+                <i class="material-icons">visibility</i>
+              </button>
+              <button class="mdl-button mdl-js-button mdl-button--icon" 
+                      onclick="editCase('${escapeHtml(caseItem.id)}', '${escapeHtml(caseItem.sheetType)}')"
+                      title="編集">
+                <i class="material-icons">edit</i>
+              </button>
+              <button class="mdl-button mdl-js-button mdl-button--icon" 
+                      onclick="deleteCase('${escapeHtml(caseItem.id)}', '${escapeHtml(caseItem.sheetType)}')"
+                      title="削除">
+                <i class="material-icons">delete</i>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+
+      elements.casesTableBody.innerHTML = casesHTML;
+      
+      // Re-initialize MDL components for new elements
+      if (typeof componentHandler !== 'undefined') {
+        componentHandler.upgradeElements(elements.casesTableBody);
+      }
+    }
+
+    /**
+     * Update pagination controls
+     */
+    function updatePagination() {
+      if (!elements.paginationContainer) return;
+
+      const { currentPage, totalPages, totalItems } = caseState.pagination;
+      
+      if (totalPages <= 1) {
+        elements.paginationContainer.style.display = 'none';
+        return;
+      }
+
+      elements.paginationContainer.style.display = 'block';
+      
+      const paginationHTML = `
+        <div class="pagination-info">
+          ${totalItems}件中 ${(currentPage - 1) * caseState.pagination.pageSize + 1}-${Math.min(currentPage * caseState.pagination.pageSize, totalItems)}件を表示
+        </div>
+        <div class="pagination-controls">
+          <button class="mdl-button mdl-js-button mdl-button--icon" 
+                  onclick="goToPage(1)" 
+                  ${currentPage === 1 ? 'disabled' : ''}>
+            <i class="material-icons">first_page</i>
+          </button>
+          <button class="mdl-button mdl-js-button mdl-button--icon" 
+                  onclick="goToPage(${currentPage - 1})" 
+                  ${currentPage === 1 ? 'disabled' : ''}>
+            <i class="material-icons">chevron_left</i>
+          </button>
+          
+          ${generatePageNumbers(currentPage, totalPages).map(page => `
+            <button class="mdl-button mdl-js-button ${page === currentPage ? 'mdl-button--colored' : ''}" 
+                    onclick="goToPage(${page})">${page}</button>
+          `).join('')}
+          
+          <button class="mdl-button mdl-js-button mdl-button--icon" 
+                  onclick="goToPage(${currentPage + 1})" 
+                  ${currentPage === totalPages ? 'disabled' : ''}>
+            <i class="material-icons">chevron_right</i>
+          </button>
+          <button class="mdl-button mdl-js-button mdl-button--icon" 
+                  onclick="goToPage(${totalPages})" 
+                  ${currentPage === totalPages ? 'disabled' : ''}>
+            <i class="material-icons">last_page</i>
+          </button>
+        </div>
+      `;
+
+      elements.paginationContainer.innerHTML = paginationHTML;
+    }
+
+    /**
+     * Update case statistics
+     */
+    function updateCaseStats(stats) {
+      if (!stats) return;
+
+      if (elements.totalCasesCount) {
+        elements.totalCasesCount.textContent = stats.total || 0;
+      }
+      if (elements.activeCasesCount) {
+        elements.activeCasesCount.textContent = stats.active || 0;
+      }
+      if (elements.completedCasesCount) {
+        elements.completedCasesCount.textContent = stats.completed || 0;
+      }
+    }
+
+    /**
+     * View case details in modal
+     */
+    async function viewCaseDetails(caseId, sheetType) {
+      try {
+        showLoading(true);
+        
+        const response = await callServerFunction('getCaseById', caseId, sheetType);
+        
+        if (response.success && response.data) {
+          displayCaseDetailsModal(response.data);
+        } else {
+          throw new Error(response.error || 'ケースの詳細を取得できませんでした');
+        }
+        
+      } catch (error) {
+        console.error('ケース詳細取得エラー:', error);
+        showError('ケースの詳細を取得できませんでした: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Display case details in modal
+     */
+    function displayCaseDetailsModal(caseData) {
+      if (!elements.caseDetailModal || !elements.caseDetailContent) return;
+
+      const detailsHTML = `
+        <div class="case-details">
+          <div class="case-header">
+            <h3>${escapeHtml(caseData.caseId || caseData.id)}</h3>
+            <span class="status-badge status-${(caseData.status || 'unknown').toLowerCase()}">
+              ${escapeHtml(caseData.status || 'Unknown')}
+            </span>
+          </div>
+          
+          <div class="case-info-grid">
+            <div class="info-item">
+              <label>シートタイプ:</label>
+              <span>${escapeHtml(caseData.sheetType || 'Unknown')}</span>
+            </div>
+            <div class="info-item">
+              <label>作成日:</label>
+              <span>${formatDate(caseData.createdDate)}</span>
+            </div>
+            <div class="info-item">
+              <label>更新日:</label>
+              <span>${formatDate(caseData.lastModified)}</span>
+            </div>
+            <div class="info-item">
+              <label>担当者:</label>
+              <span>${escapeHtml(caseData.assignee || 'Unassigned')}</span>
+            </div>
+          </div>
+          
+          <div class="case-fields">
+            ${Object.entries(caseData.fields || {}).map(([key, value]) => `
+              <div class="field-item">
+                <label>${escapeHtml(key)}:</label>
+                <span>${escapeHtml(String(value || ''))}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+
+      elements.caseDetailContent.innerHTML = detailsHTML;
+      
+      if (elements.caseDetailModal.showModal) {
+        elements.caseDetailModal.showModal();
+      }
+    }
+
+    /**
+     * Delete a case with confirmation
+     */
+    async function deleteCase(caseId, sheetType) {
+      try {
+        const confirmed = confirm(`ケース ${caseId} を削除してもよろしいですか？この操作は取り消せません。`);
+        if (!confirmed) return;
+
+        showLoading(true);
+        
+        const response = await callServerFunction('deleteCase', caseId, sheetType);
+        
+        if (response.success) {
+          showToast('ケースが正常に削除されました', 'success');
+          await loadUserCases(); // Refresh the list
+        } else {
+          throw new Error(response.error || 'ケースの削除に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('ケース削除エラー:', error);
+        showError('ケースの削除に失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Event handlers
+     */
+    function handleSearch(event) {
+      caseState.searchQuery = event.target.value.trim();
+      caseState.pagination.currentPage = 1; // Reset to first page
+      loadUserCases();
+    }
+
+    function handleFilterChange() {
+      // Collect all filter values
+      caseState.filterCriteria = {
+        status: elements.statusFilter?.value || '',
+        type: elements.typeFilter?.value || '',
+        assignee: elements.assigneeFilter?.value || '',
+        dateRange: elements.dateRangeFilter?.value || null
+      };
+      
+      caseState.pagination.currentPage = 1; // Reset to first page
+      loadUserCases();
+    }
+
+    function handleSort(field) {
+      if (caseState.sortCriteria.field === field) {
+        // Toggle direction
+        caseState.sortCriteria.direction = caseState.sortCriteria.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        // New field
+        caseState.sortCriteria.field = field;
+        caseState.sortCriteria.direction = 'asc';
+      }
+      
+      loadUserCases();
+    }
+
+    function handleSelectAll(event) {
+      const checkboxes = document.querySelectorAll('.case-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = event.target.checked;
+      });
+      
+      updateSelectedCases();
+    }
+
+    function handleCaseSelection(checkbox) {
+      updateSelectedCases();
+    }
+
+    function updateSelectedCases() {
+      const selectedCheckboxes = document.querySelectorAll('.case-checkbox:checked');
+      caseState.selectedCases = Array.from(selectedCheckboxes).map(cb => cb.value);
+      
+      // Update bulk actions visibility
+      if (elements.bulkActionsPanel) {
+        elements.bulkActionsPanel.style.display = caseState.selectedCases.length > 0 ? 'block' : 'none';
+      }
+    }
+
+    function handlePageSizeChange(event) {
+      caseState.pagination.pageSize = parseInt(event.target.value);
+      caseState.pagination.currentPage = 1;
+      loadUserCases();
+    }
+
+    /**
+     * Bulk operations
+     */
+    async function handleBulkDelete() {
+      if (caseState.selectedCases.length === 0) return;
+
+      const confirmed = confirm(`選択された ${caseState.selectedCases.length} 件のケースを削除してもよろしいですか？`);
+      if (!confirmed) return;
+
+      try {
+        showLoading(true);
+        
+        const response = await callServerFunction('bulkDeleteCases', caseState.selectedCases);
+        
+        if (response.success) {
+          showToast(`${response.data.deletedCount} 件のケースが削除されました`, 'success');
+          await loadUserCases();
+          caseState.selectedCases = [];
+        } else {
+          throw new Error(response.error || '一括削除に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('一括削除エラー:', error);
+        showError('一括削除に失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Utility functions
+     */
+    function generatePageNumbers(current, total) {
+      const pages = [];
+      const maxPages = 5;
+      
+      let start = Math.max(1, current - Math.floor(maxPages / 2));
+      let end = Math.min(total, start + maxPages - 1);
+      
+      if (end - start < maxPages - 1) {
+        start = Math.max(1, end - maxPages + 1);
+      }
+      
+      for (let i = start; i <= end; i++) {
+        pages.push(i);
+      }
+      
+      return pages;
+    }
+
+    function formatDate(dateString) {
+      if (!dateString) return '--';
+      
+      try {
+        const date = new Date(dateString);
+        return date.toLocaleDateString('ja-JP') + ' ' + date.toLocaleTimeString('ja-JP', { 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        });
+      } catch (error) {
+        return '--';
+      }
+    }
+
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+
+    function escapeHtml(text) {
+      if (typeof text !== 'string') return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // Utility function accessors
+    function showLoading(show) {
+      if (window.CasesDashApp && typeof window.CasesDashApp.showLoading === 'function') {
+        window.CasesDashApp.showLoading(show);
+      }
+    }
+
+    function showError(message) {
+      if (window.CasesDashApp && typeof window.CasesDashApp.showError === 'function') {
+        window.CasesDashApp.showError(message);
+      }
+    }
+
+    function showToast(message, type = 'info') {
+      if (window.CasesDashApp && typeof window.CasesDashApp.showToast === 'function') {
+        window.CasesDashApp.showToast(message, type);
+      }
+    }
+
+    function callServerFunction(functionName, ...args) {
+      // Try CasesDashApp first, then fallback to direct google.script.run
+      if (window.CasesDashApp && typeof window.CasesDashApp.callServerFunction === 'function') {
+        return window.CasesDashApp.callServerFunction(functionName, ...args);
+      } else if (typeof google !== 'undefined' && google.script && google.script.run) {
+        // Direct fallback to google.script.run
+        return new Promise((resolve, reject) => {
+          try {
+            google.script.run
+              .withSuccessHandler(resolve)
+              .withFailureHandler(reject)
+              [functionName](...args);
+          } catch (error) {
+            reject(error);
+          }
+        });
+      } else {
+        return Promise.reject(new Error('Server function interface not available'));
+      }
+    }
+
+    /**
+     * Create new case functionality according to specification
+     */
+    async function createNewCase() {
+      try {
+        console.log('新しいケース作成開始...');
+        
+        // Show case creation form as per specification 4.3.2
+        await showCaseCreationForm();
+        
+      } catch (error) {
+        console.error('ケース作成エラー:', error);
+        showError('ケース作成フォームの表示に失敗しました: ' + error.message);
+        
+        // Try fallback approach
+        console.log('🔄 Attempting fallback case creation...');
+        try {
+          await createNewCaseFallback();
+        } catch (fallbackError) {
+          console.error('Fallback also failed:', fallbackError);
+        }
+      }
+    }
+
+    /**
+     * Fallback case creation using simple form
+     */
+    async function createNewCaseFallback() {
+      console.log('🚧 Using fallback case creation method');
+      
+      // Get current theme
+      const isDark = getCurrentTheme() === 'dark';
+      const themeStyles = getThemeStyles(isDark);
+      
+      // Create a simple case creation modal
+      const modalHTML = `
+        <div id="simple-case-creation-dialog" style="
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0,0,0,0.7);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 10000;
+        ">
+          <div style="
+            background: ${themeStyles.background};
+            color: ${themeStyles.text};
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 500px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            border: 1px solid ${themeStyles.border};
+          ">
+            <h4 style="margin: 0 0 16px 0; color: ${themeStyles.title};">新しいケースを作成</h4>
+            <form id="simple-case-form">
+              <div style="margin-bottom: 16px;">
+                <label for="case-title" style="display: block; margin-bottom: 4px; color: ${themeStyles.text};">ケースタイトル *</label>
+                <input type="text" id="case-title" required style="
+                  width: 100%;
+                  padding: 8px;
+                  border: 1px solid ${themeStyles.border};
+                  border-radius: 4px;
+                  font-size: 14px;
+                  background: ${themeStyles.optionBackground};
+                  color: ${themeStyles.text};
+                ">
+              </div>
+              <div style="margin-bottom: 16px;">
+                <label for="case-description" style="display: block; margin-bottom: 4px; color: ${themeStyles.text};">詳細説明</label>
+                <textarea id="case-description" rows="3" style="
+                  width: 100%;
+                  padding: 8px;
+                  border: 1px solid ${themeStyles.border};
+                  border-radius: 4px;
+                  font-size: 14px;
+                  resize: vertical;
+                  background: ${themeStyles.optionBackground};
+                  color: ${themeStyles.text};
+                "></textarea>
+              </div>
+              <div style="margin-bottom: 24px;">
+                <label for="case-priority" style="display: block; margin-bottom: 4px; color: ${themeStyles.text};">優先度</label>
+                <select id="case-priority" style="
+                  width: 100%;
+                  padding: 8px;
+                  border: 1px solid ${themeStyles.border};
+                  border-radius: 4px;
+                  font-size: 14px;
+                  background: ${themeStyles.optionBackground};
+                  color: ${themeStyles.text};
+                ">
+                  <option value="low">低</option>
+                  <option value="medium" selected>中</option>
+                  <option value="high">高</option>
+                  <option value="urgent">緊急</option>
+                </select>
+              </div>
+            </form>
+            <div style="text-align: right;">
+              <button type="button" onclick="submitSimpleCaseForm()" style="
+                background: ${themeStyles.primaryButton};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                margin-left: 8px;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: background 0.2s ease;
+              "
+              onmouseover="this.style.backgroundColor='${themeStyles.primaryButtonHover}'"
+              onmouseout="this.style.backgroundColor='${themeStyles.primaryButton}'">
+                作成
+              </button>
+              <button type="button" onclick="closeSimpleCaseDialog()" style="
+                background: ${themeStyles.secondaryButton};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                margin-left: 8px;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: background 0.2s ease;
+              "
+              onmouseover="this.style.backgroundColor='${themeStyles.secondaryButtonHover}'"
+              onmouseout="this.style.backgroundColor='${themeStyles.secondaryButton}'">
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Remove existing modal if any
+      const existingModal = document.getElementById('simple-case-creation-dialog');
+      if (existingModal) {
+        existingModal.remove();
+      }
+      
+      // Add modal to body
+      document.body.insertAdjacentHTML('beforeend', modalHTML);
+      
+      console.log('✅ Simple case creation dialog displayed');
+    }
+
+    /**
+     * Submit simple case form
+     */
+    async function submitSimpleCaseForm() {
+      try {
+        const title = document.getElementById('case-title').value.trim();
+        const description = document.getElementById('case-description').value.trim();
+        const priority = document.getElementById('case-priority').value;
+        
+        if (!title) {
+          showError('ケースタイトルを入力してください');
+          return;
+        }
+        
+        console.log('📝 Submitting simple case:', { title, description, priority });
+        
+        const caseData = {
+          title: title,
+          description: description,
+          priority: priority,
+          status: 'open',
+          createdDate: new Date().toISOString(),
+          sheetType: 'General'
+        };
+        
+        showLoading(true);
+        
+        // Try to call server function
+        const response = await callServerFunction('createCase', caseData);
+        
+        if (response && response.success) {
+          showToast('ケースが正常に作成されました', 'success');
+          closeSimpleCaseDialog();
+          if (typeof loadUserCases === 'function') {
+            loadUserCases();
+          }
+        } else {
+          throw new Error(response?.error || 'ケースの作成に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('Simple case submission error:', error);
+        showError('ケースの作成に失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Generate form fields HTML based on configuration (spec 4.3.2)
+     */
+    function generateFormFieldsHTML(fields, themeStyles) {
+      let html = '';
+      
+      Object.entries(fields).forEach(([fieldName, config]) => {
+        const fieldId = `field-${fieldName}`;
+        const isRequired = config.required ? ' *' : '';
+        const requiredAttr = config.required ? 'required' : '';
+        
+        html += `
+          <div style="margin-bottom: 20px;">
+            <label for="${fieldId}" style="
+              display: block;
+              margin-bottom: 8px;
+              color: ${themeStyles.text};
+              font-weight: 500;
+              font-size: 16px;
+            ">${escapeHtml(config.label)}${isRequired}</label>
+        `;
+        
+        // Generate field based on type
+        switch (config.type) {
+          case 'text':
+            html += `
+              <input type="text" id="${fieldId}" name="${fieldName}" ${requiredAttr}
+                     placeholder="${config.format || ''}" style="
+                width: 100%;
+                padding: 12px;
+                border: 2px solid ${themeStyles.border};
+                border-radius: 8px;
+                font-size: 16px;
+                background: ${themeStyles.optionBackground};
+                color: ${themeStyles.text};
+                transition: border-color 0.2s ease;
+              "
+              onfocus="this.style.borderColor='${themeStyles.primaryButton}'"
+              onblur="this.style.borderColor='${themeStyles.border}'">
+            `;
+            break;
+            
+          case 'date':
+            html += `
+              <input type="date" id="${fieldId}" name="${fieldName}" ${requiredAttr} style="
+                width: 100%;
+                padding: 12px;
+                border: 2px solid ${themeStyles.border};
+                border-radius: 8px;
+                font-size: 16px;
+                background: ${themeStyles.optionBackground};
+                color: ${themeStyles.text};
+                transition: border-color 0.2s ease;
+              "
+              onfocus="this.style.borderColor='${themeStyles.primaryButton}'"
+              onblur="this.style.borderColor='${themeStyles.border}'">
+            `;
+            break;
+            
+          case 'time':
+            html += `
+              <input type="time" id="${fieldId}" name="${fieldName}" ${requiredAttr} style="
+                width: 100%;
+                padding: 12px;
+                border: 2px solid ${themeStyles.border};
+                border-radius: 8px;
+                font-size: 16px;
+                background: ${themeStyles.optionBackground};
+                color: ${themeStyles.text};
+                transition: border-color 0.2s ease;
+              "
+              onfocus="this.style.borderColor='${themeStyles.primaryButton}'"
+              onblur="this.style.borderColor='${themeStyles.border}'">
+            `;
+            break;
+            
+          case 'select':
+            html += `
+              <select id="${fieldId}" name="${fieldName}" ${requiredAttr} style="
+                width: 100%;
+                padding: 12px;
+                border: 2px solid ${themeStyles.border};
+                border-radius: 8px;
+                font-size: 16px;
+                background: ${themeStyles.optionBackground};
+                color: ${themeStyles.text};
+                transition: border-color 0.2s ease;
+                cursor: pointer;
+              "
+              onfocus="this.style.borderColor='${themeStyles.primaryButton}'"
+              onblur="this.style.borderColor='${themeStyles.border}'">
+            `;
+            
+            if (config.required) {
+              html += `<option value="">-- Select ${config.label} --</option>`;
+            }
+            
+            config.options.forEach(option => {
+              const isDefault = config.default === option;
+              html += `<option value="${escapeHtml(option)}" ${isDefault ? 'selected' : ''}>${escapeHtml(option)}</option>`;
+            });
+            
+            html += `</select>`;
+            break;
+            
+          case 'textarea':
+            html += `
+              <textarea id="${fieldId}" name="${fieldName}" rows="3" ${requiredAttr} style="
+                width: 100%;
+                padding: 12px;
+                border: 2px solid ${themeStyles.border};
+                border-radius: 8px;
+                font-size: 16px;
+                resize: vertical;
+                background: ${themeStyles.optionBackground};
+                color: ${themeStyles.text};
+                transition: border-color 0.2s ease;
+                font-family: inherit;
+              "
+              onfocus="this.style.borderColor='${themeStyles.primaryButton}'"
+              onblur="this.style.borderColor='${themeStyles.border}'"
+              placeholder="Enter ${config.label.toLowerCase()}..."></textarea>
+            `;
+            break;
+            
+          case 'checkbox':
+            html += `
+              <div style="display: flex; align-items: center; padding: 12px; background: ${themeStyles.optionBackground}; border-radius: 8px;">
+                <input type="checkbox" id="${fieldId}" name="${fieldName}" value="1" style="
+                  margin-right: 12px;
+                  transform: scale(1.2);
+                  cursor: pointer;
+                ">
+                <label for="${fieldId}" style="cursor: pointer; color: ${themeStyles.text}; margin: 0;">
+                  ${escapeHtml(config.label)}
+                </label>
+              </div>
+            `;
+            break;
+        }
+        
+        html += `</div>`;
+      });
+      
+      return html;
+    }
+
+    /**
+     * Set default values for form fields
+     */
+    function setFormDefaultValues(formConfig) {
+      Object.entries(formConfig.fields).forEach(([fieldName, config]) => {
+        const fieldElement = document.getElementById(`field-${fieldName}`);
+        if (!fieldElement) return;
+        
+        let defaultValue = config.default;
+        
+        // Handle special default values
+        if (defaultValue === 'today') {
+          defaultValue = new Date().toISOString().split('T')[0];
+        } else if (defaultValue === 'now') {
+          defaultValue = new Date().toTimeString().split(' ')[0].substring(0, 8);
+        } else if (defaultValue === 'currentUser') {
+          // Get current user from session or default
+          defaultValue = Session?.getActiveUser()?.getEmail()?.split('@')[0] || 'unknown';
+        }
+        
+        if (defaultValue !== undefined) {
+          if (config.type === 'checkbox') {
+            fieldElement.checked = Boolean(defaultValue);
+          } else {
+            fieldElement.value = defaultValue;
+          }
+        }
+      });
+    }
+
+    /**
+     * Close dynamic case creation dialog
+     */
+    function closeDynamicCaseDialog() {
+      const modal = document.getElementById('dynamic-case-creation-dialog');
+      if (modal) {
+        modal.style.display = 'none';
+        modal.remove();
+      }
+    }
+
+    /**
+     * Close integrated case creation dialog (legacy)
+     */
+    function closeIntegratedCaseDialog() {
+      const modal = document.getElementById('integrated-case-creation-dialog');
+      if (modal) {
+        modal.style.display = 'none';
+        modal.remove();
+      }
+    }
+
+    /**
+     * Submit dynamic case form (spec 4.3.2)
+     */
+    async function submitDynamicCaseForm() {
+      try {
+        const form = document.getElementById('dynamic-case-form');
+        const sheetType = form.dataset.sheetType;
+        
+        // Collect form data
+        const formData = new FormData(form);
+        const caseData = {
+          sheetType: sheetType,
+          channel: getChannelType(sheetType)
+        };
+        
+        // Convert FormData to object
+        for (const [key, value] of formData.entries()) {
+          const fieldElement = document.getElementById(`field-${key}`);
+          if (fieldElement && fieldElement.type === 'checkbox') {
+            caseData[key] = fieldElement.checked;
+          } else {
+            caseData[key] = value;
+          }
+        }
+        
+        console.log('📝 Submitting dynamic case form:', { sheetType, caseData });
+        
+        // Validate required fields
+        const validation = validateDynamicForm(form, sheetType);
+        if (!validation.isValid) {
+          showError(validation.errorMessage);
+          return;
+        }
+        
+        showLoading(true);
+        
+        // Call server function to create case
+        const response = await callServerFunction('createCase', caseData);
+        
+        if (response && response.success) {
+          showToast('✅ Case created successfully', 'success');
+          closeDynamicCaseDialog();
+          
+          // Refresh case list if available
+          if (typeof loadUserCases === 'function') {
+            loadUserCases();
+          }
+        } else {
+          throw new Error(response?.error || 'Failed to create case');
+        }
+        
+      } catch (error) {
+        console.error('❌ Dynamic case submission error:', error);
+        showError('Failed to create case: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Validate dynamic form based on specification
+     */
+    function validateDynamicForm(form, sheetType) {
+      const requiredFields = ['caseId', 'caseOpenDate', 'caseOpenTime', 'incomingSegment', 'productCategory', 'firstAssignee', 'caseStatus'];
+      
+      // Add 3PO specific required fields
+      if (sheetType.includes('3PO')) {
+        requiredFields.push('issueCategory');
+      }
+      
+      for (const fieldName of requiredFields) {
+        const fieldElement = document.getElementById(`field-${fieldName}`);
+        if (!fieldElement) continue;
+        
+        const value = fieldElement.type === 'checkbox' ? fieldElement.checked : fieldElement.value.trim();
+        
+        if (!value) {
+          const label = fieldElement.closest('div').querySelector('label').textContent.replace(' *', '');
+          fieldElement.focus();
+          return {
+            isValid: false,
+            errorMessage: `${label} is required`
+          };
+        }
+        
+        // Validate Case ID format (spec: X-1234567890123)
+        if (fieldName === 'caseId') {
+          const caseIdPattern = /^\d-\d{13}$/;
+          if (!caseIdPattern.test(value)) {
+            fieldElement.focus();
+            return {
+              isValid: false,
+              errorMessage: 'Case ID must be in format: X-1234567890123 (where X is any digit)'
+            };
+          }
+        }
+      }
+      
+      return { isValid: true };
+    }
+
+    /**
+     * Submit integrated case form (legacy)
+     */
+    async function submitIntegratedCaseForm() {
+      try {
+        const caseType = document.getElementById('case-type-select').value.trim();
+        const title = document.getElementById('case-title-input').value.trim();
+        const description = document.getElementById('case-description-input').value.trim();
+        const priority = document.getElementById('case-priority-select').value;
+        const customerInfo = document.getElementById('customer-info-input').value.trim();
+        
+        // Validation
+        if (!caseType) {
+          showError('ケースタイプを選択してください');
+          document.getElementById('case-type-select').focus();
+          return;
+        }
+        
+        if (!title) {
+          showError('ケースタイトルを入力してください');
+          document.getElementById('case-title-input').focus();
+          return;
+        }
+        
+        console.log('📝 Submitting integrated case:', {
+          caseType, title, description, priority, customerInfo
+        });
+        
+        // Prepare case data
+        const caseData = {
+          sheetType: caseType,
+          title: title,
+          description: description,
+          priority: priority,
+          customerInfo: customerInfo,
+          status: 'open',
+          createdDate: new Date().toISOString(),
+          assignee: Session?.getActiveUser()?.getEmail() || 'Unknown'
+        };
+        
+        showLoading(true);
+        
+        // Call server function to create case
+        const response = await callServerFunction('createCase', caseData);
+        
+        if (response && response.success) {
+          showToast('✅ ケースが正常に作成されました', 'success');
+          closeIntegratedCaseDialog();
+          
+          // Refresh case list if available
+          if (typeof loadUserCases === 'function') {
+            loadUserCases();
+          }
+        } else {
+          throw new Error(response?.error || 'ケースの作成に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('❌ Integrated case submission error:', error);
+        showError('ケースの作成に失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Close simple case creation dialog
+     */
+    function closeSimpleCaseDialog() {
+      const modal = document.getElementById('simple-case-creation-dialog');
+      if (modal) {
+        modal.style.display = 'none';
+        modal.remove();
+      }
+    }
+
+    /**
+     * Show case creation form according to specification 4.3
+     */
+    async function showCaseCreationForm() {
+      try {
+        console.log('🔍 Attempting to get available sheet types...');
+        
+        // Get available sheet types from server
+        const response = await callServerFunction('getAvailableSheetTypes');
+        
+        console.log('📊 Server response for sheet types:', response);
+        
+        if (!response.success || !response.data || !response.data.length) {
+          console.log('⚠️ No sheet types available, using default');
+          // Use default sheet types per specification
+          const defaultSheetTypes = ['OT Email', '3PO Email', 'OT Chat', '3PO Chat', 'OT Phone', '3PO Phone'];
+          displaySheetTypeSelection(defaultSheetTypes);
+        } else {
+          const sheetTypes = response.data;
+          console.log('✅ Found sheet types:', sheetTypes);
+          displaySheetTypeSelection(sheetTypes);
+        }
+        
+      } catch (error) {
+        console.error('シートタイプ取得エラー:', error);
+        console.log('🔄 Using default form due to error');
+        const defaultSheetTypes = ['OT Email', '3PO Email', 'OT Chat', '3PO Chat', 'OT Phone', '3PO Phone'];
+        displaySheetTypeSelection(defaultSheetTypes);
+      }
+    }
+
+    /**
+     * Display dynamic case creation form based on sheet type (spec 4.3.2)
+     */
+    function displayDynamicCaseCreationForm(sheetType, formConfig) {
+      console.log('🎨 Displaying dynamic case creation form for:', sheetType);
+      console.log('🔍 Form config:', formConfig);
+      
+      // Get current theme
+      const isDark = getCurrentTheme() === 'dark';
+      const themeStyles = getThemeStyles(isDark);
+      
+      // Generate form fields HTML based on configuration
+      const formFieldsHTML = generateFormFieldsHTML(formConfig.fields, themeStyles);
+      
+      const modalHTML = `
+        <div id="dynamic-case-creation-dialog" style="
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0,0,0,0.7);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 10000;
+        ">
+          <div style="
+            background: ${themeStyles.background};
+            color: ${themeStyles.text};
+            border-radius: 12px;
+            padding: 32px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            border: 1px solid ${themeStyles.border};
+          ">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+              <h3 style="margin: 0; color: ${themeStyles.title}; font-size: 24px;">
+                📝 Create New Case - ${escapeHtml(sheetType)}
+              </h3>
+              <button onclick="closeDynamicCaseDialog()" style="
+                background: none;
+                border: none;
+                font-size: 28px;
+                cursor: pointer;
+                color: ${themeStyles.subtitle};
+                padding: 4px;
+                transition: color 0.2s ease;
+                border-radius: 50%;
+                width: 36px;
+                height: 36px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+              "
+              onmouseover="this.style.color='${themeStyles.text}'; this.style.backgroundColor='${themeStyles.optionHover}'"
+              onmouseout="this.style.color='${themeStyles.subtitle}'; this.style.backgroundColor='transparent'">&times;</button>
+            </div>
+            
+            <div style="background: ${themeStyles.optionBackground}; padding: 16px; border-radius: 8px; margin-bottom: 24px; border-left: 4px solid ${themeStyles.primaryButton};">
+              <p style="margin: 0; font-size: 14px; color: ${themeStyles.text};">
+                <strong>Sheet Type:</strong> ${escapeHtml(sheetType)} |
+                <strong>Channel:</strong> ${escapeHtml(formConfig.channelType)} |
+                <strong>Type:</strong> ${formConfig.is3PO ? '3PO' : 'OT'}
+              </p>
+            </div>
+            
+            <form id="dynamic-case-form" data-sheet-type="${escapeHtml(sheetType)}">
+              ${formFieldsHTML}
+            </form>
+            
+            <!-- Action Buttons -->
+            <div style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              margin-top: 32px;
+              padding-top: 24px;
+              border-top: 1px solid ${themeStyles.border};
+            ">
+              <button type="button" onclick="closeDynamicCaseDialog()" style="
+                background: ${themeStyles.secondaryButton};
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 16px;
+                font-weight: 500;
+                transition: all 0.2s ease;
+                min-width: 120px;
+              "
+              onmouseover="this.style.backgroundColor='${themeStyles.secondaryButtonHover}'; this.style.transform='translateY(-1px)'"
+              onmouseout="this.style.backgroundColor='${themeStyles.secondaryButton}'; this.style.transform='translateY(0)'">
+                Cancel
+              </button>
+              
+              <button type="button" onclick="submitDynamicCaseForm()" style="
+                background: ${themeStyles.primaryButton};
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 16px;
+                font-weight: 500;
+                transition: all 0.2s ease;
+                min-width: 120px;
+                box-shadow: 0 2px 8px rgba(25, 118, 210, 0.3);
+              "
+              onmouseover="this.style.backgroundColor='${themeStyles.primaryButtonHover}'; this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(25, 118, 210, 0.4)'"
+              onmouseout="this.style.backgroundColor='${themeStyles.primaryButton}'; this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(25, 118, 210, 0.3)'">
+                Create Case
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Remove existing modal if any
+      const existingModal = document.getElementById('dynamic-case-creation-dialog');
+      if (existingModal) {
+        existingModal.remove();
+      }
+      
+      // Add modal to body
+      document.body.insertAdjacentHTML('beforeend', modalHTML);
+      
+      // Set default values
+      setFormDefaultValues(formConfig);
+      
+      console.log('✅ Dynamic case creation form displayed');
+    }
+    
+    /**
+     * Get current theme from theme manager
+     */
+    function getCurrentTheme() {
+      try {
+        if (window.CasesDashThemeManager && typeof window.CasesDashThemeManager.getCurrentTheme === 'function') {
+          return window.CasesDashThemeManager.getCurrentTheme();
+        }
+        
+        // Fallback: check for theme in localStorage or document
+        const savedTheme = localStorage.getItem('casesdash-theme');
+        if (savedTheme) {
+          return savedTheme;
+        }
+        
+        // Check if dark mode is active in document
+        if (document.body.classList.contains('dark-theme') ||
+            document.documentElement.classList.contains('dark-theme')) {
+          return 'dark';
+        }
+        
+        return 'light';
+      } catch (error) {
+        console.warn('Failed to get current theme:', error);
+        return 'light';
+      }
+    }
+    
+    /**
+     * Get theme-specific styles
+     */
+    function getThemeStyles(isDark) {
+      if (isDark) {
+        return {
+          background: '#1e1e1e',
+          text: '#ffffff',
+          title: '#ffffff',
+          subtitle: '#b3b3b3',
+          border: '#444444',
+          optionBackground: '#2d2d2d',
+          optionBorder: '#444444',
+          optionHover: '#3d3d3d',
+          primaryButton: '#1976d2',
+          primaryButtonHover: '#1565c0',
+          secondaryButton: '#666666',
+          secondaryButtonHover: '#555555'
+        };
+      } else {
+        return {
+          background: '#ffffff',
+          text: '#333333',
+          title: '#333333',
+          subtitle: '#666666',
+          border: '#e0e0e0',
+          optionBackground: '#fafafa',
+          optionBorder: '#ddd',
+          optionHover: '#f0f0f0',
+          primaryButton: '#1976d2',
+          primaryButtonHover: '#1565c0',
+          secondaryButton: '#666666',
+          secondaryButtonHover: '#555555'
+        };
+      }
+    }
+    
+    /**
+     * Select sheet type and highlight selection
+     */
+    function selectSheetType(sheetTypeName, element) {
+      console.log('🎯 Sheet type selected:', sheetTypeName);
+      
+      // Get current theme styles
+      const isDark = getCurrentTheme() === 'dark';
+      const themeStyles = getThemeStyles(isDark);
+      
+      // Clear previous selections
+      const options = document.querySelectorAll('#sheet-type-selection-dialog .sheet-type-options > div');
+      options.forEach(option => {
+        option.style.backgroundColor = themeStyles.optionBackground;
+        option.style.borderColor = themeStyles.optionBorder;
+      });
+      
+      // Highlight selected option
+      element.style.backgroundColor = isDark ? '#1565c0' : '#e3f2fd';
+      element.style.borderColor = '#1976d2';
+      
+      // Select radio button
+      const radio = element.querySelector('input[type="radio"]');
+      if (radio) {
+        radio.checked = true;
+      }
+    }
+
+    /**
+     * Proceed with selected sheet type to generate dynamic form (spec 4.3.2)
+     */
+    async function proceedWithSelectedSheetType() {
+      try {
+        const selectedRadio = document.querySelector('input[name="sheetType"]:checked');
+        if (!selectedRadio) {
+          showError('ケースタイプを選択してください');
+          return;
+        }
+        
+        const selectedSheetType = selectedRadio.value;
+        console.log('🎯 選択されたシートタイプ:', selectedSheetType);
+        
+        // Validate selected sheet type
+        if (!selectedSheetType || selectedSheetType.trim() === '') {
+          console.error('❌ Invalid sheet type selected:', selectedSheetType);
+          showError('有効なケースタイプを選択してください');
+          return;
+        }
+        
+        // Close selection dialog
+        closeSheetTypeDialog();
+        
+        // Show loading indicator
+        showLoading(true);
+        
+        try {
+          // Generate dynamic form based on selected sheet type (spec 4.3.2)
+          await generateDynamicCaseForm(selectedSheetType);
+        } catch (formError) {
+          console.error('🔄 Dynamic form generation failed, using fallback:', formError);
+          // Fallback to simple case creation
+          await createNewCaseFallback();
+        } finally {
+          showLoading(false);
+        }
+        
+      } catch (error) {
+        console.error('❌ フォーム生成エラー:', error);
+        showError('フォームの生成に失敗しました: ' + error.message);
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Generate dynamic case creation form based on sheet type (spec 4.3.2)
+     */
+    async function generateDynamicCaseForm(sheetType) {
+      try {
+        console.log('🎨 動的フォーム生成開始 - シートタイプ:', sheetType);
+        
+        // Determine form fields based on sheet type
+        const formConfig = getDynamicFormConfig(sheetType);
+        
+        // Display dynamic form modal
+        displayDynamicCaseCreationForm(sheetType, formConfig);
+        
+        console.log('✅ Dynamic case creation form generated successfully');
+        
+      } catch (error) {
+        console.error('❌ 動的フォーム生成エラー:', error);
+        throw error;
+      }
+    }
+
+    /**
+     * Get form configuration based on sheet type (spec 4.3.2)
+     */
+    function getDynamicFormConfig(sheetType) {
+      // Common fields for all sheets (spec section: 共通フィールド（全シート）)
+      const commonFields = {
+        caseId: { type: 'text', label: 'Case ID', required: true, format: 'X-1234567890123' },
+        caseOpenDate: { type: 'date', label: 'Case Open Date', required: true, default: 'today' },
+        caseOpenTime: { type: 'time', label: 'Case Open Time', required: true, default: 'now' },
+        incomingSegment: {
+          type: 'select',
+          label: 'Incoming Segment',
+          required: true,
+          options: ['Gold', 'Platinum', 'Titanium', 'Silver', 'Bronze - Low', 'Bronze - High'],
+          default: 'Gold'
+        },
+        productCategory: {
+          type: 'select',
+          label: 'Product Category',
+          required: true,
+          options: ['Search', 'Display', 'Video', 'Commerce', 'Apps', 'M&A', 'Policy', 'Billing', 'Other'],
+          default: 'Search'
+        },
+        triage: { type: 'checkbox', label: 'Triage', default: false },
+        preferEither: { type: 'checkbox', label: 'Prefer Either', default: false },
+        is30: { type: 'checkbox', label: 'Is 3.0', default: false },
+        firstAssignee: {
+          type: 'text',
+          label: '1st Assignee',
+          required: true,
+          default: 'currentUser'
+        },
+        mcc: { type: 'checkbox', label: 'MCC', default: false },
+        changeToChild: { type: 'checkbox', label: 'Change to Child', default: false },
+        caseStatus: {
+          type: 'select',
+          label: 'Case Status',
+          required: true,
+          options: ['Assigned', 'Solution Offered', 'Finished'],
+          default: 'Assigned'
+        },
+        bug: { type: 'checkbox', label: 'Bug', default: false },
+        needInfo: { type: 'checkbox', label: 'Need Info', default: false }
+      };
+
+      // Sheet-specific fields
+      let specificFields = {};
+      
+      // OT Email specific fields (spec: OT Email特有フィールド)
+      if (sheetType === 'OT Email') {
+        specificFields.amInitiated = { type: 'checkbox', label: 'AM Initiated', default: false };
+      }
+      
+      // 3PO specific fields (spec: 3POシート特有フィールド)
+      if (sheetType.includes('3PO')) {
+        specificFields.issueCategory = {
+          type: 'select',
+          label: 'Issue Category',
+          required: true,
+          options: [
+            'CBT invo-invo', 'CBT invo-auto', 'CBT (self to self)', 'LC creation',
+            'PP link', 'PP update', 'IDT/ Bmod', 'LCS billing policy', 'self serve issue',
+            'Unidentified Charge', 'CBT Flow', 'GQ', 'OOS', 'Bulk CBT', 'CBT ext request',
+            'MMS billing policy', 'Promotion code', 'Refund', 'Review', 'TM form',
+            'Trademarks issue', 'Under Review', 'Certificate', 'Suspend', 'AIV', 'Complaint'
+          ]
+        };
+        specificFields.details = { type: 'textarea', label: 'Details', required: false };
+      }
+
+      return {
+        sheetType: sheetType,
+        fields: { ...commonFields, ...specificFields },
+        channelType: getChannelType(sheetType),
+        is3PO: sheetType.includes('3PO')
+      };
+    }
+
+    /**
+     * Get channel type from sheet name
+     */
+    function getChannelType(sheetType) {
+      if (sheetType.includes('Email')) return 'Email';
+      if (sheetType.includes('Chat')) return 'Chat';
+      if (sheetType.includes('Phone')) return 'Phone';
+      return 'Unknown';
+    }
+
+
+    /**
+     * Display case creation form modal with FormGenerator
+     */
+    function displayCaseCreationFormModal(containerId, sheetType, formGenerator) {
+      // Get current theme
+      const isDark = getCurrentTheme() === 'dark';
+      const themeStyles = getThemeStyles(isDark);
+      
+      const modalHTML = `
+        <div id="case-creation-dialog" style="
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0,0,0,0.7);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 10000;
+        ">
+          <div style="
+            background: ${themeStyles.background};
+            color: ${themeStyles.text};
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            border: 1px solid ${themeStyles.border};
+          ">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+              <h4 style="margin: 0; color: ${themeStyles.title};">新しいケースを作成 - ${escapeHtml(sheetType)}</h4>
+              <button onclick="closeCaseCreationDialog()" style="
+                background: none;
+                border: none;
+                font-size: 24px;
+                cursor: pointer;
+                color: ${themeStyles.subtitle};
+                padding: 4px;
+                transition: color 0.2s ease;
+              "
+              onmouseover="this.style.color='${themeStyles.text}'"
+              onmouseout="this.style.color='${themeStyles.subtitle}'">&times;</button>
+            </div>
+            <div id="${containerId}"></div>
+            <div style="text-align: right; margin-top: 16px; border-top: 1px solid ${themeStyles.border}; padding-top: 16px;">
+              <button type="button" onclick="closeCaseCreationDialog()" style="
+                background: ${themeStyles.secondaryButton};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: background 0.2s ease;
+              "
+              onmouseover="this.style.backgroundColor='${themeStyles.secondaryButtonHover}'"
+              onmouseout="this.style.backgroundColor='${themeStyles.secondaryButton}'">
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Remove existing modal if any
+      const existingModal = document.getElementById('case-creation-dialog');
+      if (existingModal) {
+        existingModal.remove();
+      }
+      
+      // Add modal to body
+      document.body.insertAdjacentHTML('beforeend', modalHTML);
+      
+      console.log('✅ Case creation form modal displayed');
+      
+      // Generate form using FormGenerator
+      try {
+        formGenerator.generateForm(containerId);
+        console.log('✅ FormGenerator form generated successfully');
+      } catch (error) {
+        console.error('フォーム生成エラー:', error);
+        const container = document.getElementById(containerId);
+        if (container) {
+          container.innerHTML = `
+            <div style="
+              padding: 20px;
+              border: 1px solid #f44336;
+              border-radius: 4px;
+              background-color: ${isDark ? '#2d1b1b' : '#ffebee'};
+              color: ${isDark ? '#ff6b6b' : '#c62828'};
+            ">
+              <p><strong>フォームの生成に失敗しました。</strong></p>
+              <p>${escapeHtml(error.message)}</p>
+              <button onclick="closeCaseCreationDialog(); ${window.CasesDashCaseManager ? 'window.CasesDashCaseManager.createNewCaseFallback()' : 'createNewCaseFallback()'};" style="
+                background: ${themeStyles.primaryButton};
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+                margin-top: 8px;
+                transition: background 0.2s ease;
+              "
+              onmouseover="this.style.backgroundColor='${themeStyles.primaryButtonHover}'"
+              onmouseout="this.style.backgroundColor='${themeStyles.primaryButton}'">
+                シンプルフォームを使用
+              </button>
+            </div>
+          `;
+        }
+      }
+    }
+
+
+    /**
+     * Close sheet type selection dialog
+     */
+    function closeSheetTypeDialog() {
+      const modal = document.getElementById('sheet-type-selection-dialog');
+      if (modal) {
+        modal.style.display = 'none';
+        modal.remove();
+      }
+    }
+
+    /**
+     * Close case creation dialog
+     */
+    function closeCaseCreationDialog() {
+      const modal = document.getElementById('case-creation-dialog');
+      if (modal) {
+        modal.style.display = 'none';
+        modal.remove();
+      }
+    }
+
+    // Public API
+    return {
+      initialize,
+      loadUserCases,
+      viewCaseDetails,
+      deleteCase,
+      handleCaseSelection,
+      updateSelectedCases,
+      createNewCase,
+      createNewCaseFallback,
+      
+      // Dynamic form functions (spec 4.3.2)
+      showCaseCreationForm,
+      generateDynamicCaseForm,
+      displayDynamicCaseCreationForm,
+      generateFormFieldsHTML,
+      setFormDefaultValues,
+      submitDynamicCaseForm,
+      validateDynamicForm,
+      closeDynamicCaseDialog,
+      getDynamicFormConfig,
+      getChannelType,
+      
+      // Legacy functions
+      displaySheetTypeSelection,
+      proceedWithSelectedSheetType,
+      closeSheetTypeDialog,
+      closeCaseCreationDialog,
+      submitSimpleCaseForm,
+      closeSimpleCaseDialog,
+      submitIntegratedCaseForm,
+      closeIntegratedCaseDialog,
+      
+      getState: () => ({ ...caseState })
+    };
+
+  })();
+
+  // Global functions for HTML onclick handlers
+  window.viewCaseDetails = function(caseId, sheetType) {
+    if (window.CasesDashCaseManager) {
+      window.CasesDashCaseManager.viewCaseDetails(caseId, sheetType);
+    }
+  };
+
+  window.deleteCase = function(caseId, sheetType) {
+    if (window.CasesDashCaseManager) {
+      window.CasesDashCaseManager.deleteCase(caseId, sheetType);
+    }
+  };
+
+  window.handleCaseSelection = function(checkbox) {
+    if (window.CasesDashCaseManager) {
+      window.CasesDashCaseManager.handleCaseSelection(checkbox);
+    }
+  };
+
+  window.goToPage = function(page) {
+    if (window.CasesDashCaseManager && window.CasesDashCaseManager.getState) {
+      const state = window.CasesDashCaseManager.getState();
+      state.pagination.currentPage = page;
+      window.CasesDashCaseManager.loadUserCases();
+    }
+  };
+
+  // Case creation global functions
+  window.proceedWithSelectedSheetType = function() {
+    try {
+      const selectedRadio = document.querySelector('input[name="sheetType"]:checked');
+      if (!selectedRadio) {
+        if (window.CasesDashApp && typeof window.CasesDashApp.showError === 'function') {
+          window.CasesDashApp.showError('ケースタイプを選択してください');
+        }
+        return;
+      }
+      
+      const selectedSheetType = selectedRadio.value;
+      console.log('🎯 選択されたシートタイプ (Global):', selectedSheetType);
+      
+      // Validate selected sheet type
+      if (!selectedSheetType || selectedSheetType.trim() === '') {
+        console.error('❌ Invalid sheet type selected (Global):', selectedSheetType);
+        if (window.CasesDashApp && typeof window.CasesDashApp.showError === 'function') {
+          window.CasesDashApp.showError('有効なケースタイプを選択してください');
+        }
+        return;
+      }
+      
+      // Close selection dialog
+      const modal = document.getElementById('sheet-type-selection-dialog');
+      if (modal) {
+        modal.style.display = 'none';
+        modal.remove();
+      }
+      
+      // Show loading
+      if (window.CasesDashApp && typeof window.CasesDashApp.showLoading === 'function') {
+        window.CasesDashApp.showLoading(true);
+      }
+      
+      // Call case manager to generate form
+      if (window.CasesDashCaseManager) {
+        const manager = window.CasesDashCaseManager;
+        if (typeof manager.generateCaseForm === 'function') {
+          manager.generateCaseForm(selectedSheetType).catch(error => {
+            console.error('🔄 FormGenerator failed, using fallback (Global):', error);
+            // Fallback to simple case creation
+            if (typeof manager.createNewCaseFallback === 'function') {
+              manager.createNewCaseFallback();
+            }
+          }).finally(() => {
+            if (window.CasesDashApp && typeof window.CasesDashApp.showLoading === 'function') {
+              window.CasesDashApp.showLoading(false);
+            }
+          });
+        } else {
+          // Direct fallback
+          if (typeof manager.createNewCaseFallback === 'function') {
+            manager.createNewCaseFallback();
+          }
+          if (window.CasesDashApp && typeof window.CasesDashApp.showLoading === 'function') {
+            window.CasesDashApp.showLoading(false);
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('❌ フォーム生成エラー (Global):', error);
+      if (window.CasesDashApp && typeof window.CasesDashApp.showError === 'function') {
+        window.CasesDashApp.showError('フォームの生成に失敗しました: ' + error.message);
+      }
+      if (window.CasesDashApp && typeof window.CasesDashApp.showLoading === 'function') {
+        window.CasesDashApp.showLoading(false);
+      }
+    }
+  };
+
+  window.closeSheetTypeDialog = function() {
+    const modal = document.getElementById('sheet-type-selection-dialog');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.remove();
+    }
+  };
+
+  window.closeCaseCreationDialog = function() {
+    const modal = document.getElementById('case-creation-dialog');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.remove();
+    }
+  };
+
+  // Dynamic case creation global functions (spec 4.3.2)
+  window.submitDynamicCaseForm = function() {
+    if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.submitDynamicCaseForm === 'function') {
+      window.CasesDashCaseManager.submitDynamicCaseForm();
+    }
+  };
+
+  window.closeDynamicCaseDialog = function() {
+    if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.closeDynamicCaseDialog === 'function') {
+      window.CasesDashCaseManager.closeDynamicCaseDialog();
+    }
+  };
+
+  // Integrated case creation global functions (legacy)
+  window.submitIntegratedCaseForm = function() {
+    if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.submitIntegratedCaseForm === 'function') {
+      window.CasesDashCaseManager.submitIntegratedCaseForm();
+    }
+  };
+
+  window.closeIntegratedCaseDialog = function() {
+    if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.closeIntegratedCaseDialog === 'function') {
+      window.CasesDashCaseManager.closeIntegratedCaseDialog();
+    }
+  };
+
+  // Simple case creation global functions
+  window.submitSimpleCaseForm = function() {
+    if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.submitSimpleCaseForm === 'function') {
+      window.CasesDashCaseManager.submitSimpleCaseForm();
+    }
+  };
+
+  window.closeSimpleCaseDialog = function() {
+    if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.closeSimpleCaseDialog === 'function') {
+      window.CasesDashCaseManager.closeSimpleCaseDialog();
+    }
+  };
+
+  // Sheet type selection global function
+  window.selectSheetType = function(sheetTypeName, element) {
+    console.log('🎯 Sheet type selected (Global):', sheetTypeName);
+    
+    // Get current theme styles
+    const isDark = (function() {
+      try {
+        if (window.CasesDashThemeManager && typeof window.CasesDashThemeManager.getCurrentTheme === 'function') {
+          return window.CasesDashThemeManager.getCurrentTheme() === 'dark';
+        }
+        
+        const savedTheme = localStorage.getItem('casesdash-theme');
+        if (savedTheme) {
+          return savedTheme === 'dark';
+        }
+        
+        if (document.body.classList.contains('dark-theme') ||
+            document.documentElement.classList.contains('dark-theme')) {
+          return true;
+        }
+        
+        return false;
+      } catch (error) {
+        console.warn('Failed to get current theme (Global):', error);
+        return false;
+      }
+    })();
+    
+    const themeStyles = isDark ? {
+      optionBackground: '#2d2d2d',
+      optionBorder: '#444444'
+    } : {
+      optionBackground: '#fafafa',
+      optionBorder: '#ddd'
+    };
+    
+    // Clear previous selections
+    const options = document.querySelectorAll('#sheet-type-selection-dialog .sheet-type-options > div');
+    options.forEach(option => {
+      option.style.backgroundColor = themeStyles.optionBackground;
+      option.style.borderColor = themeStyles.optionBorder;
+    });
+    
+    // Highlight selected option
+    element.style.backgroundColor = isDark ? '#1565c0' : '#e3f2fd';
+    element.style.borderColor = '#1976d2';
+    
+    // Select radio button
+    const radio = element.querySelector('input[type="radio"]');
+    if (radio) {
+      radio.checked = true;
+    }
+  };
+}
+</script>

@@ -1,0 +1,1853 @@
+<script>
+/**
+ * Statistics Manager - Main Analytics Functionality
+ * Central hub for all statistical analysis and reporting features
+ * 
+ * @author Roo
+ * @version 1.0
+ * @since 2025-05-25
+ */
+
+if (typeof window !== 'undefined') {
+  window.CasesDashStatisticsManager = (function() {
+    'use strict';
+
+    // Statistics state
+    let statisticsState = {
+      initialized: false,
+      currentData: null,
+      currentPeriod: 'monthly',
+      selectedMetrics: ['caseVolume', 'responseTime', 'satisfaction'],
+      chartInstances: {},
+      filters: {
+        dateRange: null,
+        sheetTypes: [],
+        status: [],
+        assignee: []
+      },
+      // Advanced analysis features
+      predictiveModels: {
+        enabled: false,
+        trendPredictions: null,
+        volumeForecasts: null,
+        performanceTargets: null
+      },
+      benchmarks: {
+        enabled: false,
+        industryStandards: null,
+        historicalBaselines: null,
+        targetGoals: null
+      },
+      optimizationSuggestions: {
+        enabled: false,
+        currentSuggestions: [],
+        implementedSuggestions: [],
+        dismissedSuggestions: []
+      }
+    };
+
+    // DOM elements cache
+    let elements = {};
+
+    /**
+     * Initialize Statistics Manager
+     */
+    async function initialize() {
+      try {
+        console.log('初期化中: 統計分析マネージャー...');
+        
+        cacheElements();
+        setupEventListeners();
+        
+        // Chart.js availability check
+        console.log('Chart.js の可用性を確認中...');
+        const chartJsReady = await waitForChartJs();
+        if (chartJsReady) {
+          console.log('✅ Chart.js が利用可能です');
+        } else {
+          console.warn('⚠️ Chart.js の読み込みに失敗しました。基本的なチャート機能のみ利用可能です。');
+        }
+        
+        loadStatisticsConfiguration();
+        
+        statisticsState.initialized = true;
+        console.log('✅ 統計分析マネージャーが正常に初期化されました');
+        
+      } catch (error) {
+        console.error('❌ 統計分析マネージャーの初期化に失敗:', error);
+        throw error;
+      }
+    }
+
+    /**
+     * Cache DOM elements for statistics views
+     */
+    function cacheElements() {
+      elements = {
+        // Main statistics view
+        statisticsView: document.getElementById('statistics-view'),
+        
+        // Dashboard elements
+        dashboardOverview: document.getElementById('dashboard-overview'),
+        metricsCards: document.getElementById('metrics-cards'),
+        trendsChart: document.getElementById('trends-chart'),
+        
+        // Analysis controls
+        periodSelector: document.getElementById('period-selector'),
+        metricsSelector: document.getElementById('metrics-selector'),
+        dateRangeInput: document.getElementById('date-range-input'),
+        filterPanel: document.getElementById('filter-panel'),
+        
+        // Report generation
+        reportGenerateBtn: document.getElementById('generate-report-btn'),
+        exportOptionsPanel: document.getElementById('export-options'),
+        
+        // Sentiment integration area
+        sentimentStatsSection: document.getElementById('sentiment-stats-section'),
+        sentimentQuickEdit: document.getElementById('sentiment-quick-edit'),
+        
+        // Charts containers
+        volumeChart: document.getElementById('volume-chart'),
+        performanceChart: document.getElementById('performance-chart'),
+        distributionChart: document.getElementById('distribution-chart'),
+        comparisonChart: document.getElementById('comparison-chart'),
+        
+        // Data tables
+        detailedStatsTable: document.getElementById('detailed-stats-table'),
+        topCasesTable: document.getElementById('top-cases-table'),
+        
+        // Advanced analytics elements
+        predictiveAnalyticsPanel: document.getElementById('predictive-analytics-panel'),
+        trendPredictionChart: document.getElementById('trend-prediction-chart'),
+        benchmarkComparisonPanel: document.getElementById('benchmark-comparison-panel'),
+        optimizationSuggestionsPanel: document.getElementById('optimization-suggestions-panel'),
+        performanceTargetsPanel: document.getElementById('performance-targets-panel'),
+        
+        // Advanced controls
+        enablePredictiveBtn: document.getElementById('enable-predictive-btn'),
+        enableBenchmarksBtn: document.getElementById('enable-benchmarks-btn'),
+        generateForecastBtn: document.getElementById('generate-forecast-btn'),
+        saveBenchmarksBtn: document.getElementById('save-benchmarks-btn'),
+        applyOptimizationBtn: document.getElementById('apply-optimization-btn')
+      };
+    }
+
+    /**
+     * Setup event listeners for statistics functionality
+     */
+    function setupEventListeners() {
+      // Period selector
+      if (elements.periodSelector) {
+        elements.periodSelector.addEventListener('change', handlePeriodChange);
+      }
+
+      // Metrics selector (checkboxes)
+      if (elements.metricsSelector) {
+        const checkboxes = elements.metricsSelector.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(checkbox => {
+          checkbox.addEventListener('change', handleMetricsChange);
+        });
+      }
+
+      // Date range filter
+      if (elements.dateRangeInput) {
+        elements.dateRangeInput.addEventListener('change', handleDateRangeChange);
+      }
+
+      // Report generation
+      if (elements.reportGenerateBtn) {
+        elements.reportGenerateBtn.addEventListener('click', generateReport);
+      }
+
+      // Sentiment quick edit (integration)
+      if (elements.sentimentQuickEdit) {
+        elements.sentimentQuickEdit.addEventListener('click', openSentimentQuickEdit);
+      }
+
+      // Advanced analytics controls
+      if (elements.enablePredictiveBtn) {
+        elements.enablePredictiveBtn.addEventListener('click', enablePredictiveAnalytics);
+      }
+
+      if (elements.enableBenchmarksBtn) {
+        elements.enableBenchmarksBtn.addEventListener('click', enableBenchmarkComparison);
+      }
+
+      if (elements.generateForecastBtn) {
+        elements.generateForecastBtn.addEventListener('click', generateTrendForecast);
+      }
+
+      if (elements.saveBenchmarksBtn) {
+        elements.saveBenchmarksBtn.addEventListener('click', saveBenchmarkTargets);
+      }
+
+      if (elements.applyOptimizationBtn) {
+        elements.applyOptimizationBtn.addEventListener('click', applyOptimizationSuggestion);
+      }
+    }
+
+    /**
+     * Load statistics configuration and initial data
+     */
+    async function loadStatisticsConfiguration() {
+      try {
+        showLoading(true);
+        
+        // Load user preferences for statistics
+        const configResponse = await callServerFunction('getStatisticsConfiguration');
+        if (configResponse.success) {
+          applyStatisticsConfiguration(configResponse.data);
+        }
+        
+        // Load initial statistics data
+        await loadStatisticsData();
+        
+      } catch (error) {
+        console.error('統計設定の読み込みに失敗:', error);
+        showError('統計設定の読み込みに失敗しました。デフォルト設定を使用します。');
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Apply statistics configuration
+     */
+    function applyStatisticsConfiguration(config) {
+      if (!config) return;
+
+      // Apply period preference
+      if (config.defaultPeriod && elements.periodSelector) {
+        elements.periodSelector.value = config.defaultPeriod;
+        statisticsState.currentPeriod = config.defaultPeriod;
+      }
+
+      // Apply metrics preferences
+      if (config.selectedMetrics && elements.metricsSelector) {
+        const checkboxes = elements.metricsSelector.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(checkbox => {
+          checkbox.checked = config.selectedMetrics.includes(checkbox.value);
+        });
+        statisticsState.selectedMetrics = config.selectedMetrics;
+      }
+
+      // Apply filters
+      if (config.filters) {
+        statisticsState.filters = { ...statisticsState.filters, ...config.filters };
+      }
+    }
+
+    /**
+     * Load main statistics data
+     */
+    async function loadStatisticsData() {
+      try {
+        const requestParams = {
+          period: statisticsState.currentPeriod,
+          metrics: statisticsState.selectedMetrics,
+          filters: statisticsState.filters
+        };
+
+        const response = await callServerFunction('getStatisticsData', requestParams);
+        
+        if (response.success) {
+          statisticsState.currentData = response.data;
+          updateStatisticsDisplay(response.data);
+        } else {
+          throw new Error(response.error || '統計データの取得に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('統計データの読み込みに失敗:', error);
+        showError('統計データの読み込みに失敗しました。');
+      }
+    }
+
+    /**
+     * Update statistics display with new data
+     */
+    function updateStatisticsDisplay(data) {
+      if (!data) return;
+
+      // Update overview metrics
+      updateOverviewMetrics(data.overview);
+      
+      // Update charts
+      updateChartsDisplay(data.charts);
+      
+      // Update detailed tables
+      updateDetailedTables(data.details);
+      
+      // Update sentiment integration section
+      updateSentimentIntegration(data.sentiment);
+    }
+
+    /**
+     * Update overview metrics cards
+     */
+    function updateOverviewMetrics(overview) {
+      if (!overview || !elements.metricsCards) return;
+
+      const metricsHTML = `
+        <div class="mdl-grid">
+          <div class="mdl-cell mdl-cell--3-col">
+            <div class="stat-card mdl-card mdl-shadow--2dp">
+              <div class="mdl-card__title">
+                <h4 class="mdl-card__title-text">総ケース数</h4>
+              </div>
+              <div class="mdl-card__supporting-text">
+                <span class="stat-number">${overview.totalCases || 0}</span>
+                <span class="stat-change ${overview.casesChange >= 0 ? 'positive' : 'negative'}">
+                  ${overview.casesChange >= 0 ? '+' : ''}${overview.casesChange || 0}%
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="mdl-cell mdl-cell--3-col">
+            <div class="stat-card mdl-card mdl-shadow--2dp">
+              <div class="mdl-card__title">
+                <h4 class="mdl-card__title-text">平均応答時間</h4>
+              </div>
+              <div class="mdl-card__supporting-text">
+                <span class="stat-number">${overview.avgResponseTime || '0h'}</span>
+                <span class="stat-change ${overview.responseTimeChange <= 0 ? 'positive' : 'negative'}">
+                  ${overview.responseTimeChange >= 0 ? '+' : ''}${overview.responseTimeChange || 0}%
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="mdl-cell mdl-cell--3-col">
+            <div class="stat-card mdl-card mdl-shadow--2dp">
+              <div class="mdl-card__title">
+                <h4 class="mdl-card__title-text">解決率</h4>
+              </div>
+              <div class="mdl-card__supporting-text">
+                <span class="stat-number">${overview.resolutionRate || 0}%</span>
+                <span class="stat-change ${overview.resolutionRateChange >= 0 ? 'positive' : 'negative'}">
+                  ${overview.resolutionRateChange >= 0 ? '+' : ''}${overview.resolutionRateChange || 0}%
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="mdl-cell mdl-cell--3-col">
+            <div class="stat-card mdl-card mdl-shadow--2dp">
+              <div class="mdl-card__title">
+                <h4 class="mdl-card__title-text">満足度スコア</h4>
+              </div>
+              <div class="mdl-card__supporting-text">
+                <span class="stat-number">${overview.satisfactionScore || 0}/10</span>
+                <span class="stat-change ${overview.satisfactionChange >= 0 ? 'positive' : 'negative'}">
+                  ${overview.satisfactionChange >= 0 ? '+' : ''}${overview.satisfactionChange || 0}%
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+
+      elements.metricsCards.innerHTML = metricsHTML;
+    }
+
+    /**
+     * Update charts display
+     */
+    function updateChartsDisplay(chartsData) {
+      if (!chartsData) return;
+
+      // Volume trend chart
+      if (chartsData.volumeTrend && elements.volumeChart) {
+        renderVolumeChart(chartsData.volumeTrend);
+      }
+
+      // Performance metrics chart
+      if (chartsData.performance && elements.performanceChart) {
+        renderPerformanceChart(chartsData.performance);
+      }
+
+      // Case distribution chart
+      if (chartsData.distribution && elements.distributionChart) {
+        renderDistributionChart(chartsData.distribution);
+      }
+
+      // Comparison chart
+      if (chartsData.comparison && elements.comparisonChart) {
+        renderComparisonChart(chartsData.comparison);
+      }
+    }
+
+    /**
+     * Render volume trend chart with Chart.js
+     */
+    function renderVolumeChart(data) {
+      try {
+        // Destroy existing chart if it exists
+        if (statisticsState.chartInstances.volumeChart) {
+          statisticsState.chartInstances.volumeChart.destroy();
+        }
+
+        // Create chart container with loading state
+        const chartHTML = `
+          <div class="chart-container">
+            <div class="chart-title">
+              <span class="chart-title-icon material-icons">trending_up</span>
+              ケース量トレンド (${statisticsState.currentPeriod})
+            </div>
+            <div class="chart-wrapper">
+              <canvas id="volume-chart-canvas"></canvas>
+              <div class="chart-loading" id="volume-chart-loading">
+                <div class="loading-spinner"></div>
+                <span>チャートを読み込み中...</span>
+              </div>
+            </div>
+          </div>
+        `;
+        elements.volumeChart.innerHTML = chartHTML;
+
+        // Get canvas context
+        const canvas = document.getElementById('volume-chart-canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Chart.js configuration
+        const config = {
+          type: 'line',
+          data: {
+            labels: data.labels || [],
+            datasets: [{
+              label: 'ケース数',
+              data: data.values || [],
+              borderColor: getThemeColor('--md-primary-50'),
+              backgroundColor: createGradient(ctx, getThemeColor('--md-primary-60'), getThemeColor('--md-primary-80')),
+              borderWidth: 3,
+              fill: true,
+              tension: 0.4,
+              pointBackgroundColor: getThemeColor('--md-primary-40'),
+              pointBorderColor: '#fff',
+              pointBorderWidth: 2,
+              pointRadius: 6,
+              pointHoverRadius: 8,
+              pointHoverBackgroundColor: getThemeColor('--md-primary-30'),
+              pointHoverBorderWidth: 3
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                display: false
+              },
+              tooltip: {
+                backgroundColor: getThemeColor('--current-surface-container-high'),
+                titleColor: getThemeColor('--current-on-surface'),
+                bodyColor: getThemeColor('--current-on-surface-variant'),
+                borderColor: getThemeColor('--current-surface-container-highest'),
+                borderWidth: 1,
+                cornerRadius: 12,
+                displayColors: false,
+                titleFont: {
+                  size: 14,
+                  weight: '500'
+                },
+                bodyFont: {
+                  size: 13
+                },
+                padding: 12,
+                callbacks: {
+                  title: function(context) {
+                    return context[0].label;
+                  },
+                  label: function(context) {
+                    return `ケース数: ${context.parsed.y}`;
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                grid: {
+                  color: getThemeColor('--current-surface-container-high'),
+                  lineWidth: 1
+                },
+                ticks: {
+                  color: getThemeColor('--current-on-surface-variant'),
+                  font: {
+                    size: 12
+                  }
+                }
+              },
+              y: {
+                grid: {
+                  color: getThemeColor('--current-surface-container-high'),
+                  lineWidth: 1
+                },
+                ticks: {
+                  color: getThemeColor('--current-on-surface-variant'),
+                  font: {
+                    size: 12
+                  },
+                  callback: function(value) {
+                    return value.toLocaleString();
+                  }
+                }
+              }
+            },
+            animation: {
+              duration: 1000,
+              easing: 'easeInOutQuart'
+            },
+            interaction: {
+              intersect: false,
+              mode: 'index'
+            }
+          }
+        };
+
+        // Create chart
+        statisticsState.chartInstances.volumeChart = new Chart(ctx, config);
+        
+        // Hide loading indicator
+        setTimeout(() => {
+          const loading = document.getElementById('volume-chart-loading');
+          if (loading) {
+            loading.style.display = 'none';
+          }
+        }, 500);
+
+      } catch (error) {
+        console.error('ボリュームチャートの描画に失敗:', error);
+        elements.volumeChart.innerHTML = '<div class="chart-error">チャートデータを読み込めませんでした。</div>';
+      }
+    }
+
+    /**
+     * Render performance metrics chart with Chart.js
+     */
+    function renderPerformanceChart(data) {
+      try {
+        // Destroy existing chart if it exists
+        if (statisticsState.chartInstances.performanceChart) {
+          statisticsState.chartInstances.performanceChart.destroy();
+        }
+
+        const chartHTML = `
+          <div class="chart-container">
+            <div class="chart-title">
+              <span class="chart-title-icon material-icons">speed</span>
+              パフォーマンス指標
+            </div>
+            <div class="chart-wrapper">
+              <canvas id="performance-chart-canvas"></canvas>
+              <div class="chart-loading" id="performance-chart-loading">
+                <div class="loading-spinner"></div>
+                <span>チャートを読み込み中...</span>
+              </div>
+            </div>
+          </div>
+        `;
+        elements.performanceChart.innerHTML = chartHTML;
+
+        const canvas = document.getElementById('performance-chart-canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Extract data for bar chart
+        const labels = data.metrics.map(metric => metric.label);
+        const values = data.metrics.map(metric => parseFloat(metric.percentage) || 0);
+        const colors = data.metrics.map((metric, index) => {
+          const baseColors = [
+            getThemeColor('--md-primary-50'),
+            getThemeColor('--md-success-50'),
+            getThemeColor('--md-warning-50'),
+            getThemeColor('--md-error-50')
+          ];
+          return baseColors[index % baseColors.length];
+        });
+
+        const config = {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: 'パフォーマンス (%)',
+              data: values,
+              backgroundColor: colors.map(color => hexToRgba(color, 0.8)),
+              borderColor: colors,
+              borderWidth: 2,
+              borderRadius: 8,
+              borderSkipped: false
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                display: false
+              },
+              tooltip: {
+                backgroundColor: getThemeColor('--current-surface-container-high'),
+                titleColor: getThemeColor('--current-on-surface'),
+                bodyColor: getThemeColor('--current-on-surface-variant'),
+                borderColor: getThemeColor('--current-surface-container-highest'),
+                borderWidth: 1,
+                cornerRadius: 12,
+                displayColors: true,
+                titleFont: {
+                  size: 14,
+                  weight: '500'
+                },
+                bodyFont: {
+                  size: 13
+                },
+                padding: 12,
+                callbacks: {
+                  label: function(context) {
+                    const metric = data.metrics[context.dataIndex];
+                    return [
+                      `値: ${metric.value}`,
+                      `パフォーマンス: ${context.parsed.y}%`
+                    ];
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                grid: {
+                  display: false
+                },
+                ticks: {
+                  color: getThemeColor('--current-on-surface-variant'),
+                  font: {
+                    size: 12
+                  }
+                }
+              },
+              y: {
+                beginAtZero: true,
+                max: 100,
+                grid: {
+                  color: getThemeColor('--current-surface-container-high'),
+                  lineWidth: 1
+                },
+                ticks: {
+                  color: getThemeColor('--current-on-surface-variant'),
+                  font: {
+                    size: 12
+                  },
+                  callback: function(value) {
+                    return value + '%';
+                  }
+                }
+              }
+            },
+            animation: {
+              duration: 1200,
+              easing: 'easeOutQuart'
+            }
+          }
+        };
+
+        statisticsState.chartInstances.performanceChart = new Chart(ctx, config);
+        
+        setTimeout(() => {
+          const loading = document.getElementById('performance-chart-loading');
+          if (loading) {
+            loading.style.display = 'none';
+          }
+        }, 500);
+
+      } catch (error) {
+        console.error('パフォーマンスチャートの描画に失敗:', error);
+        elements.performanceChart.innerHTML = '<div class="chart-error">チャートデータを読み込めませんでした。</div>';
+      }
+    }
+
+    /**
+     * Render distribution chart with Chart.js
+     */
+    function renderDistributionChart(data) {
+      try {
+        // Destroy existing chart if it exists
+        if (statisticsState.chartInstances.distributionChart) {
+          statisticsState.chartInstances.distributionChart.destroy();
+        }
+
+        const chartHTML = `
+          <div class="chart-container">
+            <div class="chart-title">
+              <span class="chart-title-icon material-icons">pie_chart</span>
+              ケース分布
+            </div>
+            <div class="chart-wrapper">
+              <canvas id="distribution-chart-canvas"></canvas>
+              <div class="chart-loading" id="distribution-chart-loading">
+                <div class="loading-spinner"></div>
+                <span>チャートを読み込み中...</span>
+              </div>
+            </div>
+          </div>
+        `;
+        elements.distributionChart.innerHTML = chartHTML;
+
+        const canvas = document.getElementById('distribution-chart-canvas');
+        const ctx = canvas.getContext('2d');
+
+        const labels = data.categories.map(category => category.name);
+        const values = data.categories.map(category => category.count);
+        const colors = generateColorPalette(labels.length);
+
+        const config = {
+          type: 'doughnut',
+          data: {
+            labels: labels,
+            datasets: [{
+              data: values,
+              backgroundColor: colors.map(color => hexToRgba(color, 0.8)),
+              borderColor: colors,
+              borderWidth: 3,
+              hoverBackgroundColor: colors.map(color => hexToRgba(color, 0.9)),
+              hoverBorderWidth: 4
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '60%',
+            plugins: {
+              legend: {
+                position: 'right',
+                labels: {
+                  color: getThemeColor('--current-on-surface'),
+                  font: {
+                    size: 13
+                  },
+                  padding: 20,
+                  usePointStyle: true,
+                  pointStyle: 'circle'
+                }
+              },
+              tooltip: {
+                backgroundColor: getThemeColor('--current-surface-container-high'),
+                titleColor: getThemeColor('--current-on-surface'),
+                bodyColor: getThemeColor('--current-on-surface-variant'),
+                borderColor: getThemeColor('--current-surface-container-highest'),
+                borderWidth: 1,
+                cornerRadius: 12,
+                displayColors: true,
+                titleFont: {
+                  size: 14,
+                  weight: '500'
+                },
+                bodyFont: {
+                  size: 13
+                },
+                padding: 12,
+                callbacks: {
+                  label: function(context) {
+                    const category = data.categories[context.dataIndex];
+                    return [
+                      `件数: ${category.count}`,
+                      `割合: ${category.percentage}%`
+                    ];
+                  }
+                }
+              }
+            },
+            animation: {
+              animateRotate: true,
+              animateScale: true,
+              duration: 1500,
+              easing: 'easeOutBounce'
+            }
+          }
+        };
+
+        statisticsState.chartInstances.distributionChart = new Chart(ctx, config);
+        
+        setTimeout(() => {
+          const loading = document.getElementById('distribution-chart-loading');
+          if (loading) {
+            loading.style.display = 'none';
+          }
+        }, 500);
+
+      } catch (error) {
+        console.error('分布チャートの描画に失敗:', error);
+        elements.distributionChart.innerHTML = '<div class="chart-error">チャートデータを読み込めませんでした。</div>';
+      }
+    }
+
+    /**
+     * Render comparison chart with Chart.js
+     */
+    function renderComparisonChart(data) {
+      try {
+        // Destroy existing chart if it exists
+        if (statisticsState.chartInstances.comparisonChart) {
+          statisticsState.chartInstances.comparisonChart.destroy();
+        }
+
+        const chartHTML = `
+          <div class="chart-container">
+            <div class="chart-title">
+              <span class="chart-title-icon material-icons">compare_arrows</span>
+              期間比較
+            </div>
+            <div class="chart-wrapper">
+              <canvas id="comparison-chart-canvas"></canvas>
+              <div class="chart-loading" id="comparison-chart-loading">
+                <div class="loading-spinner"></div>
+                <span>チャートを読み込み中...</span>
+              </div>
+            </div>
+          </div>
+        `;
+        elements.comparisonChart.innerHTML = chartHTML;
+
+        const canvas = document.getElementById('comparison-chart-canvas');
+        const ctx = canvas.getContext('2d');
+
+        const labels = data.comparisons.map(comp => comp.metric);
+        const currentData = data.comparisons.map(comp => parseFloat(comp.current) || 0);
+        const previousData = data.comparisons.map(comp => parseFloat(comp.previous) || 0);
+
+        const config = {
+          type: 'bar',
+          data: {
+            labels: labels,
+            datasets: [{
+              label: '今期',
+              data: currentData,
+              backgroundColor: hexToRgba(getThemeColor('--md-primary-50'), 0.8),
+              borderColor: getThemeColor('--md-primary-50'),
+              borderWidth: 2,
+              borderRadius: 6
+            }, {
+              label: '前期',
+              data: previousData,
+              backgroundColor: hexToRgba(getThemeColor('--md-secondary-50'), 0.8),
+              borderColor: getThemeColor('--md-secondary-50'),
+              borderWidth: 2,
+              borderRadius: 6
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                position: 'top',
+                labels: {
+                  color: getThemeColor('--current-on-surface'),
+                  font: {
+                    size: 13
+                  },
+                  padding: 20,
+                  usePointStyle: true
+                }
+              },
+              tooltip: {
+                backgroundColor: getThemeColor('--current-surface-container-high'),
+                titleColor: getThemeColor('--current-on-surface'),
+                bodyColor: getThemeColor('--current-on-surface-variant'),
+                borderColor: getThemeColor('--current-surface-container-highest'),
+                borderWidth: 1,
+                cornerRadius: 12,
+                displayColors: true,
+                titleFont: {
+                  size: 14,
+                  weight: '500'
+                },
+                bodyFont: {
+                  size: 13
+                },
+                padding: 12,
+                callbacks: {
+                  afterBody: function(context) {
+                    if (context.length > 0) {
+                      const compIndex = context[0].dataIndex;
+                      const comparison = data.comparisons[compIndex];
+                      const change = comparison.change >= 0 ? `+${comparison.change}%` : `${comparison.change}%`;
+                      return `変化率: ${change}`;
+                    }
+                    return '';
+                  }
+                }
+              }
+            },
+            scales: {
+              x: {
+                grid: {
+                  display: false
+                },
+                ticks: {
+                  color: getThemeColor('--current-on-surface-variant'),
+                  font: {
+                    size: 12
+                  }
+                }
+              },
+              y: {
+                beginAtZero: true,
+                grid: {
+                  color: getThemeColor('--current-surface-container-high'),
+                  lineWidth: 1
+                },
+                ticks: {
+                  color: getThemeColor('--current-on-surface-variant'),
+                  font: {
+                    size: 12
+                  }
+                }
+              }
+            },
+            animation: {
+              duration: 1400,
+              easing: 'easeOutQuart'
+            }
+          }
+        };
+
+        statisticsState.chartInstances.comparisonChart = new Chart(ctx, config);
+        
+        setTimeout(() => {
+          const loading = document.getElementById('comparison-chart-loading');
+          if (loading) {
+            loading.style.display = 'none';
+          }
+        }, 500);
+
+      } catch (error) {
+        console.error('比較チャートの描画に失敗:', error);
+        elements.comparisonChart.innerHTML = '<div class="chart-error">チャートデータを読み込めませんでした。</div>';
+      }
+    }
+
+    /**
+     * Update detailed statistics tables
+     */
+    function updateDetailedTables(detailsData) {
+      if (!detailsData) return;
+
+      // Update detailed stats table
+      if (detailsData.detailed && elements.detailedStatsTable) {
+        updateDetailedStatsTable(detailsData.detailed);
+      }
+
+      // Update top cases table
+      if (detailsData.topCases && elements.topCasesTable) {
+        updateTopCasesTable(detailsData.topCases);
+      }
+    }
+
+    /**
+     * Update sentiment integration section
+     */
+    function updateSentimentIntegration(sentimentData) {
+      if (!sentimentData || !elements.sentimentStatsSection) return;
+
+      const sentimentHTML = `
+        <div class="sentiment-integration-panel">
+          <div class="mdl-card mdl-shadow--2dp">
+            <div class="mdl-card__title">
+              <h4 class="mdl-card__title-text">Sentiment Score統計</h4>
+              <div class="mdl-layout-spacer"></div>
+              <button id="sentiment-quick-edit" class="mdl-button mdl-js-button mdl-button--icon" title="今月のスコアを編集">
+                <i class="material-icons">edit</i>
+              </button>
+            </div>
+            <div class="mdl-card__supporting-text">
+              <div class="sentiment-stats-grid">
+                <div class="sentiment-stat-item">
+                  <span class="stat-label">今月のスコア</span>
+                  <span class="stat-value">${sentimentData.currentScore || '--'}/10</span>
+                </div>
+                <div class="sentiment-stat-item">
+                  <span class="stat-label">3ヶ月平均</span>
+                  <span class="stat-value">${sentimentData.threeMonthAvg || '--'}/10</span>
+                </div>
+                <div class="sentiment-stat-item">
+                  <span class="stat-label">年間平均</span>
+                  <span class="stat-value">${sentimentData.yearlyAvg || '--'}/10</span>
+                </div>
+                <div class="sentiment-stat-item">
+                  <span class="stat-label">トレンド</span>
+                  <span class="stat-value ${sentimentData.trend === 'up' ? 'positive' : sentimentData.trend === 'down' ? 'negative' : ''}">
+                    ${sentimentData.trendText || '--'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="mdl-card__actions">
+              <button class="mdl-button mdl-js-button mdl-button--colored" onclick="showSentimentHistory()">
+                詳細履歴を表示
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      elements.sentimentStatsSection.innerHTML = sentimentHTML;
+      
+      // Re-attach event listener for quick edit
+      const quickEditBtn = document.getElementById('sentiment-quick-edit');
+      if (quickEditBtn) {
+        quickEditBtn.addEventListener('click', openSentimentQuickEdit);
+      }
+    }
+
+    /**
+     * Generate simple line chart (ASCII/HTML-based)
+     */
+    function generateSimpleLineChart(labels, values, unit) {
+      const maxValue = Math.max(...values);
+      const minValue = Math.min(...values);
+      const range = maxValue - minValue || 1;
+
+      return `
+        <div class="simple-line-chart">
+          ${labels.map((label, index) => {
+            const height = Math.round(((values[index] - minValue) / range) * 100);
+            return `
+              <div class="chart-point" title="${label}: ${values[index]} ${unit}">
+                <div class="chart-bar" style="height: ${height}%"></div>
+                <div class="chart-label">${label}</div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    /**
+     * Event handlers
+     */
+    function handlePeriodChange(event) {
+      statisticsState.currentPeriod = event.target.value;
+      loadStatisticsData();
+    }
+
+    function handleMetricsChange(event) {
+      const selectedMetrics = Array.from(
+        elements.metricsSelector.querySelectorAll('input[type="checkbox"]:checked')
+      ).map(cb => cb.value);
+      
+      statisticsState.selectedMetrics = selectedMetrics;
+      loadStatisticsData();
+    }
+
+    function handleDateRangeChange(event) {
+      statisticsState.filters.dateRange = event.target.value;
+      loadStatisticsData();
+    }
+
+    /**
+     * Generate comprehensive report
+     */
+    async function generateReport() {
+      try {
+        showLoading(true);
+        
+        const reportParams = {
+          period: statisticsState.currentPeriod,
+          metrics: statisticsState.selectedMetrics,
+          filters: statisticsState.filters,
+          includeCharts: true,
+          includeSentiment: true
+        };
+
+        const response = await callServerFunction('generateStatisticsReport', reportParams);
+        
+        if (response.success) {
+          showToast('レポートが正常に生成されました', 'success');
+          
+          // Download or display report
+          if (response.data.downloadUrl) {
+            window.open(response.data.downloadUrl, '_blank');
+          } else {
+            displayInlineReport(response.data);
+          }
+        } else {
+          throw new Error(response.error || 'レポート生成に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('レポート生成エラー:', error);
+        showError('レポート生成に失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Open sentiment quick edit modal
+     */
+    function openSentimentQuickEdit() {
+      try {
+        if (window.CasesDashSentimentManager && typeof window.CasesDashSentimentManager.showSentimentModal === 'function') {
+          window.CasesDashSentimentManager.showSentimentModal();
+        } else {
+          showError('Sentiment編集機能が利用できません。');
+        }
+      } catch (error) {
+        console.error('Sentiment編集の開始に失敗:', error);
+        showError('Sentiment編集を開始できませんでした。');
+      }
+    }
+
+    /**
+     * Enable predictive analytics features
+     */
+    async function enablePredictiveAnalytics() {
+      try {
+        showLoading(true);
+        
+        const response = await callServerFunction('enablePredictiveAnalytics', {
+          dataPoints: statisticsState.currentData,
+          period: statisticsState.currentPeriod
+        });
+        
+        if (response.success) {
+          statisticsState.predictiveModels.enabled = true;
+          statisticsState.predictiveModels.trendPredictions = response.data.predictions;
+          statisticsState.predictiveModels.volumeForecasts = response.data.forecasts;
+          
+          updatePredictiveDisplay(response.data);
+          showToast('予測分析機能が有効になりました', 'success');
+        } else {
+          throw new Error(response.error || '予測分析の有効化に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('予測分析有効化エラー:', error);
+        showError('予測分析の有効化に失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Enable benchmark comparison features
+     */
+    async function enableBenchmarkComparison() {
+      try {
+        showLoading(true);
+        
+        const response = await callServerFunction('enableBenchmarkComparison', {
+          currentMetrics: statisticsState.currentData,
+          period: statisticsState.currentPeriod
+        });
+        
+        if (response.success) {
+          statisticsState.benchmarks.enabled = true;
+          statisticsState.benchmarks.industryStandards = response.data.industry;
+          statisticsState.benchmarks.historicalBaselines = response.data.historical;
+          
+          updateBenchmarkDisplay(response.data);
+          showToast('ベンチマーク比較機能が有効になりました', 'success');
+        } else {
+          throw new Error(response.error || 'ベンチマーク比較の有効化に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('ベンチマーク比較有効化エラー:', error);
+        showError('ベンチマーク比較の有効化に失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Generate trend forecasts
+     */
+    async function generateTrendForecast() {
+      try {
+        showLoading(true);
+        
+        const forecastParams = {
+          historicalData: statisticsState.currentData,
+          period: statisticsState.currentPeriod,
+          forecastPeriods: 6, // 6期間先まで予測
+          confidenceLevel: 0.95
+        };
+        
+        const response = await callServerFunction('generateTrendForecast', forecastParams);
+        
+        if (response.success) {
+          updateTrendForecastDisplay(response.data);
+          showToast('トレンド予測が生成されました', 'success');
+        } else {
+          throw new Error(response.error || 'トレンド予測の生成に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('トレンド予測生成エラー:', error);
+        showError('トレンド予測の生成に失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Save benchmark targets
+     */
+    async function saveBenchmarkTargets() {
+      try {
+        showLoading(true);
+        
+        // Get target values from UI
+        const targets = extractBenchmarkTargetsFromUI();
+        
+        const response = await callServerFunction('saveBenchmarkTargets', {
+          targets: targets,
+          period: statisticsState.currentPeriod
+        });
+        
+        if (response.success) {
+          statisticsState.benchmarks.targetGoals = targets;
+          showToast('ベンチマーク目標が保存されました', 'success');
+        } else {
+          throw new Error(response.error || 'ベンチマーク目標の保存に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('ベンチマーク目標保存エラー:', error);
+        showError('ベンチマーク目標の保存に失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Apply optimization suggestion
+     */
+    async function applyOptimizationSuggestion(suggestionId) {
+      try {
+        showLoading(true);
+        
+        const suggestion = statisticsState.optimizationSuggestions.currentSuggestions
+          .find(s => s.id === suggestionId);
+          
+        if (!suggestion) {
+          throw new Error('最適化提案が見つかりません');
+        }
+        
+        const response = await callServerFunction('applyOptimizationSuggestion', {
+          suggestionId: suggestionId,
+          suggestion: suggestion
+        });
+        
+        if (response.success) {
+          // Move suggestion to implemented list
+          statisticsState.optimizationSuggestions.implementedSuggestions.push(suggestion);
+          statisticsState.optimizationSuggestions.currentSuggestions =
+            statisticsState.optimizationSuggestions.currentSuggestions.filter(s => s.id !== suggestionId);
+          
+          updateOptimizationDisplay();
+          showToast('最適化提案が適用されました', 'success');
+        } else {
+          throw new Error(response.error || '最適化提案の適用に失敗しました');
+        }
+        
+      } catch (error) {
+        console.error('最適化提案適用エラー:', error);
+        showError('最適化提案の適用に失敗しました: ' + error.message);
+      } finally {
+        showLoading(false);
+      }
+    }
+
+    /**
+     * Update predictive analytics display
+     */
+    function updatePredictiveDisplay(data) {
+      if (!data || !elements.predictiveAnalyticsPanel) return;
+      
+      const predictiveHTML = `
+        <div class="predictive-analytics-container">
+          <div class="mdl-card mdl-shadow--2dp">
+            <div class="mdl-card__title">
+              <h4 class="mdl-card__title-text">予測分析</h4>
+            </div>
+            <div class="mdl-card__supporting-text">
+              <div class="predictions-grid">
+                <div class="prediction-item">
+                  <span class="prediction-label">次期ケース量予測</span>
+                  <span class="prediction-value">${data.predictions.volumePrediction || '--'}</span>
+                  <span class="prediction-confidence">信頼度: ${data.predictions.volumeConfidence || '--'}%</span>
+                </div>
+                <div class="prediction-item">
+                  <span class="prediction-label">応答時間予測</span>
+                  <span class="prediction-value">${data.predictions.responseTimePrediction || '--'}</span>
+                  <span class="prediction-confidence">信頼度: ${data.predictions.responseTimeConfidence || '--'}%</span>
+                </div>
+                <div class="prediction-item">
+                  <span class="prediction-label">満足度予測</span>
+                  <span class="prediction-value">${data.predictions.satisfactionPrediction || '--'}</span>
+                  <span class="prediction-confidence">信頼度: ${data.predictions.satisfactionConfidence || '--'}%</span>
+                </div>
+              </div>
+            </div>
+            <div class="mdl-card__actions">
+              <button id="generate-forecast-btn" class="mdl-button mdl-js-button mdl-button--colored">
+                詳細予測を生成
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      elements.predictiveAnalyticsPanel.innerHTML = predictiveHTML;
+      
+      // Re-attach event listener
+      const generateBtn = document.getElementById('generate-forecast-btn');
+      if (generateBtn) {
+        generateBtn.addEventListener('click', generateTrendForecast);
+      }
+    }
+
+    /**
+     * Update benchmark comparison display
+     */
+    function updateBenchmarkDisplay(data) {
+      if (!data || !elements.benchmarkComparisonPanel) return;
+      
+      const benchmarkHTML = `
+        <div class="benchmark-comparison-container">
+          <div class="mdl-card mdl-shadow--2dp">
+            <div class="mdl-card__title">
+              <h4 class="mdl-card__title-text">ベンチマーク比較</h4>
+            </div>
+            <div class="mdl-card__supporting-text">
+              <table class="mdl-data-table mdl-js-data-table">
+                <thead>
+                  <tr>
+                    <th class="mdl-data-table__cell--non-numeric">指標</th>
+                    <th>現在値</th>
+                    <th>業界標準</th>
+                    <th>過去ベース</th>
+                    <th>パフォーマンス</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.comparisons.map(comp => `
+                    <tr>
+                      <td class="mdl-data-table__cell--non-numeric">${comp.metric}</td>
+                      <td>${comp.current}</td>
+                      <td>${comp.industry}</td>
+                      <td>${comp.historical}</td>
+                      <td class="${comp.performance === 'above' ? 'positive' : comp.performance === 'below' ? 'negative' : ''}">
+                        ${comp.performance === 'above' ? '基準以上' : comp.performance === 'below' ? '基準以下' : '基準同等'}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+            <div class="mdl-card__actions">
+              <button id="save-benchmarks-btn" class="mdl-button mdl-js-button mdl-button--colored">
+                目標値を設定
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      elements.benchmarkComparisonPanel.innerHTML = benchmarkHTML;
+      
+      // Re-attach event listener
+      const saveBtn = document.getElementById('save-benchmarks-btn');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', saveBenchmarkTargets);
+      }
+    }
+
+    /**
+     * Update trend forecast display
+     */
+    function updateTrendForecastDisplay(data) {
+      if (!data || !elements.trendPredictionChart) return;
+      
+      const forecastHTML = `
+        <div class="trend-forecast-container">
+          <div class="mdl-card mdl-shadow--2dp">
+            <div class="mdl-card__title">
+              <h4 class="mdl-card__title-text">トレンド予測チャート</h4>
+            </div>
+            <div class="mdl-card__supporting-text">
+              <div class="forecast-chart">
+                ${generateForecastChart(data.historical, data.forecast)}
+              </div>
+              <div class="forecast-summary">
+                <div class="forecast-insight">
+                  <span class="insight-label">予測トレンド:</span>
+                  <span class="insight-value ${data.trend === 'increasing' ? 'positive' : data.trend === 'decreasing' ? 'negative' : ''}">${data.trendDescription}</span>
+                </div>
+                <div class="forecast-insight">
+                  <span class="insight-label">信頼区間:</span>
+                  <span class="insight-value">${data.confidenceInterval.lower} - ${data.confidenceInterval.upper}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      elements.trendPredictionChart.innerHTML = forecastHTML;
+    }
+
+    /**
+     * Update optimization suggestions display
+     */
+    function updateOptimizationDisplay() {
+      if (!elements.optimizationSuggestionsPanel) return;
+      
+      const suggestions = statisticsState.optimizationSuggestions.currentSuggestions;
+      
+      const optimizationHTML = `
+        <div class="optimization-suggestions-container">
+          <div class="mdl-card mdl-shadow--2dp">
+            <div class="mdl-card__title">
+              <h4 class="mdl-card__title-text">パフォーマンス最適化提案</h4>
+            </div>
+            <div class="mdl-card__supporting-text">
+              ${suggestions.length > 0 ? suggestions.map(suggestion => `
+                <div class="suggestion-item" data-suggestion-id="${suggestion.id}">
+                  <div class="suggestion-header">
+                    <span class="suggestion-title">${suggestion.title}</span>
+                    <span class="suggestion-impact ${suggestion.impact}">${suggestion.impactLevel}</span>
+                  </div>
+                  <div class="suggestion-description">${suggestion.description}</div>
+                  <div class="suggestion-actions">
+                    <button class="mdl-button mdl-js-button mdl-button--colored apply-suggestion-btn" data-suggestion-id="${suggestion.id}">
+                      適用
+                    </button>
+                    <button class="mdl-button mdl-js-button dismiss-suggestion-btn" data-suggestion-id="${suggestion.id}">
+                      却下
+                    </button>
+                  </div>
+                </div>
+              `).join('') : '<p>現在、最適化提案はありません。</p>'}
+            </div>
+          </div>
+        </div>
+      `;
+      
+      elements.optimizationSuggestionsPanel.innerHTML = optimizationHTML;
+      
+      // Attach event listeners for suggestion actions
+      const applyBtns = elements.optimizationSuggestionsPanel.querySelectorAll('.apply-suggestion-btn');
+      applyBtns.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const suggestionId = e.target.getAttribute('data-suggestion-id');
+          applyOptimizationSuggestion(suggestionId);
+        });
+      });
+    }
+
+    /**
+     * Generate forecast chart visualization
+     */
+    function generateForecastChart(historical, forecast) {
+      const allData = [...historical, ...forecast];
+      const maxValue = Math.max(...allData.map(d => d.value));
+      const minValue = Math.min(...allData.map(d => d.value));
+      const range = maxValue - minValue || 1;
+      
+      return `
+        <div class="forecast-chart-container">
+          <div class="chart-axis-y">
+            <span class="axis-label-top">${maxValue}</span>
+            <span class="axis-label-middle">${Math.round((maxValue + minValue) / 2)}</span>
+            <span class="axis-label-bottom">${minValue}</span>
+          </div>
+          <div class="chart-data">
+            ${historical.map((point, index) => {
+              const height = ((point.value - minValue) / range) * 100;
+              return `
+                <div class="chart-point historical" style="height: ${height}%" title="${point.label}: ${point.value}">
+                  <div class="point-marker"></div>
+                  <div class="point-label">${point.label}</div>
+                </div>
+              `;
+            }).join('')}
+            ${forecast.map((point, index) => {
+              const height = ((point.value - minValue) / range) * 100;
+              return `
+                <div class="chart-point forecast" style="height: ${height}%" title="${point.label}: ${point.value} (予測)">
+                  <div class="point-marker forecast-marker"></div>
+                  <div class="point-label">${point.label}</div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    /**
+     * Extract benchmark targets from UI
+     */
+    function extractBenchmarkTargetsFromUI() {
+      // This would extract target values from input fields in the UI
+      // For now, return placeholder data
+      return {
+        caseVolume: 100,
+        responseTime: 24,
+        satisfactionScore: 8.5,
+        resolutionRate: 90
+      };
+    }
+
+    /**
+     * Chart.js Utility Functions
+     */
+    
+    /**
+     * Get theme color from CSS custom properties
+     * @param {string} colorVariable - CSS custom property name
+     * @returns {string} - Color value
+     */
+    function getThemeColor(colorVariable) {
+      try {
+        const rootStyles = getComputedStyle(document.documentElement);
+        const color = rootStyles.getPropertyValue(colorVariable).trim();
+        
+        // Fallback colors if CSS variable is not found
+        const fallbackColors = {
+          '--md-primary-50': '#008197',
+          '--md-primary-40': '#00677c',
+          '--md-primary-60': '#009cb3',
+          '--md-primary-80': '#00d5ed',
+          '--md-secondary-50': '#6c7075',
+          '--md-success-50': '#228b32',
+          '--md-warning-50': '#987100',
+          '--md-error-50': '#de3730',
+          '--current-surface-container-high': '#252a2f',
+          '--current-surface-container-highest': '#30353a',
+          '--current-on-surface': '#d7dde2',
+          '--current-on-surface-variant': '#a0a5aa'
+        };
+        
+        return color || fallbackColors[colorVariable] || '#008197';
+      } catch (error) {
+        console.warn('テーマカラーの取得に失敗:', colorVariable, error);
+        return '#008197'; // Default primary color
+      }
+    }
+
+    /**
+     * Create gradient for Chart.js
+     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * @param {string} startColor - Start color
+     * @param {string} endColor - End color
+     * @param {string} direction - Gradient direction ('vertical' or 'horizontal')
+     * @returns {CanvasGradient} - Gradient object
+     */
+    function createGradient(ctx, startColor, endColor, direction = 'vertical') {
+      try {
+        const canvas = ctx.canvas;
+        let gradient;
+        
+        if (direction === 'vertical') {
+          gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+        } else {
+          gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+        }
+        
+        gradient.addColorStop(0, startColor);
+        gradient.addColorStop(1, endColor);
+        
+        return gradient;
+      } catch (error) {
+        console.warn('グラデーション作成に失敗:', error);
+        return startColor; // Fallback to solid color
+      }
+    }
+
+    /**
+     * Convert hex color to rgba
+     * @param {string} hex - Hex color value
+     * @param {number} alpha - Alpha value (0-1)
+     * @returns {string} - RGBA color string
+     */
+    function hexToRgba(hex, alpha = 1) {
+      try {
+        // Remove # if present
+        hex = hex.replace('#', '');
+        
+        // Handle 3-digit hex
+        if (hex.length === 3) {
+          hex = hex.split('').map(char => char + char).join('');
+        }
+        
+        // Extract RGB values
+        const r = parseInt(hex.substring(0, 2), 16);
+        const g = parseInt(hex.substring(2, 4), 16);
+        const b = parseInt(hex.substring(4, 6), 16);
+        
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+      } catch (error) {
+        console.warn('Hex to RGBA変換に失敗:', hex, error);
+        return `rgba(0, 129, 151, ${alpha})`; // Fallback color
+      }
+    }
+
+    /**
+     * Generate color palette for charts
+     * @param {number} count - Number of colors needed
+     * @returns {Array<string>} - Array of hex colors
+     */
+    function generateColorPalette(count) {
+      const baseColors = [
+        getThemeColor('--md-primary-50'),
+        getThemeColor('--md-success-50'),
+        getThemeColor('--md-warning-50'),
+        getThemeColor('--md-error-50'),
+        getThemeColor('--md-primary-60'),
+        getThemeColor('--md-secondary-50'),
+        '#FF6B6B', // Coral
+        '#4ECDC4', // Turquoise
+        '#45B7D1', // Sky Blue
+        '#96CEB4', // Mint Green
+        '#FFEAA7', // Light Yellow
+        '#DDA0DD'  // Plum
+      ];
+      
+      const colors = [];
+      for (let i = 0; i < count; i++) {
+        colors.push(baseColors[i % baseColors.length]);
+      }
+      
+      return colors;
+    }
+
+    /**
+     * Destroy all chart instances
+     */
+    function destroyAllCharts() {
+      Object.keys(statisticsState.chartInstances).forEach(key => {
+        if (statisticsState.chartInstances[key] && typeof statisticsState.chartInstances[key].destroy === 'function') {
+          statisticsState.chartInstances[key].destroy();
+        }
+      });
+      statisticsState.chartInstances = {};
+    }
+
+    /**
+     * Update chart themes when theme changes
+     */
+    function updateChartThemes() {
+      // Destroy and recreate all charts with new theme colors
+      if (statisticsState.currentData && statisticsState.currentData.charts) {
+        destroyAllCharts();
+        updateChartsDisplay(statisticsState.currentData.charts);
+      }
+    }
+
+    /**
+     * Check if Chart.js is available
+     * @returns {boolean} - True if Chart.js is loaded
+     */
+    function isChartJsAvailable() {
+      return typeof Chart !== 'undefined';
+    }
+
+    /**
+     * Wait for Chart.js to load
+     * @returns {Promise<boolean>} - Resolves when Chart.js is ready
+     */
+    function waitForChartJs() {
+      return new Promise((resolve) => {
+        if (isChartJsAvailable()) {
+          resolve(true);
+          return;
+        }
+        
+        // Poll for Chart.js availability
+        const checkInterval = setInterval(() => {
+          if (isChartJsAvailable()) {
+            clearInterval(checkInterval);
+            resolve(true);
+          }
+        }, 100);
+        
+        // Timeout after 10 seconds
+        setTimeout(() => {
+          clearInterval(checkInterval);
+          console.warn('Chart.js の読み込みがタイムアウトしました');
+          resolve(false);
+        }, 10000);
+      });
+    }
+
+    /**
+     * Enhanced chart configuration with responsive design
+     * @param {string} chartType - Type of chart
+     * @returns {Object} - Base configuration object
+     */
+    function getBaseChartConfig(chartType) {
+      const baseConfig = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            labels: {
+              color: getThemeColor('--current-on-surface'),
+              font: {
+                family: 'Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                size: 13
+              },
+              padding: 16,
+              usePointStyle: true
+            }
+          },
+          tooltip: {
+            backgroundColor: getThemeColor('--current-surface-container-high'),
+            titleColor: getThemeColor('--current-on-surface'),
+            bodyColor: getThemeColor('--current-on-surface-variant'),
+            borderColor: getThemeColor('--current-surface-container-highest'),
+            borderWidth: 1,
+            cornerRadius: 12,
+            titleFont: {
+              family: 'Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+              size: 14,
+              weight: '500'
+            },
+            bodyFont: {
+              family: 'Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+              size: 13
+            },
+            padding: 12,
+            displayColors: true
+          }
+        },
+        animation: {
+          duration: 1000,
+          easing: 'easeInOutQuart'
+        },
+        interaction: {
+          intersect: false,
+          mode: 'index'
+        }
+      };
+
+      // Chart-specific configurations
+      if (chartType === 'line' || chartType === 'bar') {
+        baseConfig.scales = {
+          x: {
+            grid: {
+              color: getThemeColor('--current-surface-container-high'),
+              lineWidth: 1
+            },
+            ticks: {
+              color: getThemeColor('--current-on-surface-variant'),
+              font: {
+                family: 'Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                size: 12
+              }
+            }
+          },
+          y: {
+            grid: {
+              color: getThemeColor('--current-surface-container-high'),
+              lineWidth: 1
+            },
+            ticks: {
+              color: getThemeColor('--current-on-surface-variant'),
+              font: {
+                family: 'Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                size: 12
+              }
+            }
+          }
+        };
+      }
+
+      return baseConfig;
+    }
+
+    /**
+     * Utility functions
+     */
+    function showLoading(show) {
+      if (window.CasesDashApp && typeof window.CasesDashApp.showLoading === 'function') {
+        window.CasesDashApp.showLoading(show);
+      }
+    }
+
+    function showError(message) {
+      if (window.CasesDashApp && typeof window.CasesDashApp.showError === 'function') {
+        window.CasesDashApp.showError(message);
+      } else {
+        console.error(message);
+      }
+    }
+
+    function showToast(message, type = 'info') {
+      if (window.CasesDashApp && typeof window.CasesDashApp.showToast === 'function') {
+        window.CasesDashApp.showToast(message, type);
+      } else {
+        console.log(message);
+      }
+    }
+
+    function callServerFunction(functionName, ...args) {
+      if (window.CasesDashApp && typeof window.CasesDashApp.callServerFunction === 'function') {
+        return window.CasesDashApp.callServerFunction(functionName, ...args);
+      } else {
+        return Promise.reject(new Error('Server function interface not available'));
+      }
+    }
+
+    // Public API
+    return {
+      initialize,
+      loadStatisticsData,
+      updateStatisticsDisplay,
+      generateReport,
+      openSentimentQuickEdit,
+      
+      // Advanced analytics functions
+      enablePredictiveAnalytics,
+      enableBenchmarkComparison,
+      generateTrendForecast,
+      saveBenchmarkTargets,
+      applyOptimizationSuggestion,
+      
+      // Display update functions
+      updatePredictiveDisplay,
+      updateBenchmarkDisplay,
+      updateTrendForecastDisplay,
+      updateOptimizationDisplay,
+      
+      // Chart.js functions
+      updateChartThemes,
+      destroyAllCharts,
+      isChartJsAvailable,
+      waitForChartJs,
+      
+      // Utility functions
+      getState: () => ({ ...statisticsState }),
+      getPredictiveState: () => ({ ...statisticsState.predictiveModels }),
+      getBenchmarkState: () => ({ ...statisticsState.benchmarks }),
+      getOptimizationState: () => ({ ...statisticsState.optimizationSuggestions })
+    };
+
+  })();
+
+  // Global function for sentiment history (called from UI)
+  window.showSentimentHistory = function() {
+    try {
+      if (window.CasesDashApp && typeof window.CasesDashApp.showSentimentManagement === 'function') {
+        window.CasesDashApp.showSentimentManagement();
+      }
+    } catch (error) {
+      console.error('Sentiment履歴表示に失敗:', error);
+    }
+  };
+}
+</script>

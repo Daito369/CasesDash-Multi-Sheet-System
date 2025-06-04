@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CasesDash - Live Mode</title>
+
+    <!-- Essential Fonts Only - No MDC -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: 'Roboto', sans-serif;
+            background-color: #f5f5f5;
+            overflow-x: hidden;
+        }
+
+        /* CRITICAL: HIDE ALL POSSIBLE SPINNERS AND LOADING ELEMENTS */
+        .mdl-spinner,
+        .mdl-spinner__circle,
+        .mdl-spinner__circle-left,
+        .mdl-spinner__circle-right,
+        .mdl-spinner__gap-patch,
+        .mdc-circular-progress,
+        .mdc-linear-progress,
+        .loading-overlay,
+        .spinner,
+        [class*="spinner"],
+        [class*="loading"],
+        [class*="mdl-spinner"],
+        [id*="loading"],
+        [id*="spinner"] {
+            display: none !important;
+            visibility: hidden !important;
+            opacity: 0 !important;
+            height: 0 !important;
+            width: 0 !important;
+            position: absolute !important;
+            top: -9999px !important;
+            left: -9999px !important;
+        }
+
+        /* Force show main content immediately */
+        .dashboard-grid,
+        .activity-section,
+        .urgent-cases,
+        .stat-card,
+        .tab-content.active {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
+        }
+
+        .live-mode-container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .live-mode-header {
+            background: linear-gradient(135deg, #1976d2 0%, #1565c0 100%);
+            color: white;
+            padding: 8px 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 56px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .live-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(76, 175, 80, 0.2);
+            padding: 4px 12px;
+            border-radius: 16px;
+            border: 1px solid rgba(76, 175, 80, 0.5);
+        }
+
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: #4caf50;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .refresh-timer {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .tab-container {
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .simple-tab-bar {
+            display: flex;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .simple-tab {
+            flex: 1;
+            padding: 12px 16px;
+            border: none;
+            background: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            transition: all 0.2s ease;
+        }
+
+        .simple-tab:hover {
+            background: #f5f5f5;
+            color: #1976d2;
+        }
+
+        .simple-tab.active {
+            background: white;
+            color: #1976d2;
+            border-bottom: 2px solid #1976d2;
+        }
+
+        .simple-tab i {
+            font-size: 20px;
+        }
+
+        /* Simple Form Styles */
+        .form-field {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .form-field label {
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+        }
+
+        .form-field input,
+        .form-field select {
+            padding: 12px 16px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            font-family: 'Roboto', sans-serif;
+            background: white;
+            transition: border-color 0.2s ease;
+        }
+
+        .form-field input:focus,
+        .form-field select:focus {
+            outline: none;
+            border-color: #1976d2;
+            box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.1);
+        }
+
+        .simple-button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: 'Roboto', sans-serif;
+        }
+
+        .simple-button.primary {
+            background: #1976d2;
+            color: white;
+        }
+
+        .simple-button.primary:hover {
+            background: #1565c0;
+            box-shadow: 0 2px 8px rgba(25, 118, 210, 0.3);
+        }
+
+        .simple-button.secondary {
+            background: white;
+            color: #1976d2;
+            border: 1px solid #1976d2;
+        }
+
+        .simple-button.secondary:hover {
+            background: #f5f5f5;
+        }
+
+        .content-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.3s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s ease;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #1976d2;
+            margin-bottom: 8px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .stat-change {
+            font-size: 12px;
+            margin-top: 8px;
+        }
+
+        .stat-change.positive {
+            color: #4caf50;
+        }
+
+        .stat-change.negative {
+            color: #f44336;
+        }
+
+        .activity-section {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .activity-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+
+        .activity-icon {
+            width: 40px;
+            height: 40px;
+            background: #e3f2fd;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 16px;
+        }
+
+        .activity-content {
+            flex: 1;
+        }
+
+        .activity-text {
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .activity-time {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .urgent-cases {
+            background: #fff3e0;
+            border: 1px solid #ffb74d;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        .urgent-cases .section-title {
+            color: #f57c00;
+            margin-bottom: 12px;
+        }
+
+        .case-item {
+            background: white;
+            border-radius: 4px;
+            padding: 12px;
+            margin-bottom: 8px;
+            border-left: 4px solid #ff9800;
+        }
+
+        .case-id {
+            font-weight: 500;
+            color: #1976d2;
+        }
+
+        .case-details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .add-case-form {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            border-left: 4px solid #f44336;
+        }
+
+        .success-message {
+            background: #e8f5e8;
+            color: #2e7d32;
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            border-left: 4px solid #4caf50;
+        }
+
+        @media (max-width: 768px) {
+            .live-mode-header {
+                padding: 8px 12px;
+            }
+
+            .header-left h1 {
+                font-size: 18px;
+            }
+
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .content-container {
+                padding: 12px;
+            }
+
+            .stat-card {
+                padding: 16px;
+            }
+
+            .stat-value {
+                font-size: 2rem;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .resize-handle {
+            position: fixed;
+            bottom: 0;
+            right: 0;
+            width: 20px;
+            height: 20px;
+            background: #1976d2;
+            cursor: nw-resize;
+            opacity: 0.7;
+            z-index: 1001;
+        }
+
+        .resize-handle:hover {
+            opacity: 1;
+        }
+
+        /* Mobile and Tablet Layout Styles */
+        .mobile-layout .live-mode-header {
+            padding: 6px 12px;
+            min-height: 48px;
+        }
+
+        .mobile-layout .header-left h1 {
+            font-size: 18px;
+        }
+
+        .mobile-layout .simple-tab-bar {
+            flex-wrap: nowrap;
+            overflow-x: auto;
+        }
+
+        .mobile-layout .simple-tab {
+            min-width: 120px;
+            flex-shrink: 0;
+        }
+
+        .tablet-layout .dashboard-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+        }
+
+        .tablet-layout .form-row {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        /* Enhanced Mobile Optimizations */
+        @media (max-width: 480px) {
+            .live-mode-header .header-right {
+                gap: 8px;
+            }
+
+            .refresh-timer {
+                display: none;
+            }
+
+            .simple-tab span {
+                display: none;
+            }
+
+            .simple-tab i {
+                margin: 0;
+            }
+
+            .stat-value {
+                font-size: 2rem;
+            }
+
+            .activity-section {
+                padding: 16px;
+            }
+
+            .add-case-form {
+                padding: 16px;
+            }
+        }
+
+        /* Loading States */
+        .form-loading .simple-button.primary {
+            position: relative;
+            color: transparent;
+        }
+
+        .form-loading .simple-button.primary::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            margin-left: -8px;
+            margin-top: -8px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Error and Success States */
+        .field-error {
+            color: #f44336 !important;
+            font-size: 12px !important;
+            margin-top: 4px !important;
+        }
+
+        .form-field.error input,
+        .form-field.error select {
+            border-color: #f44336 !important;
+            box-shadow: 0 0 0 2px rgba(244, 67, 54, 0.1) !important;
+        }
+
+        .form-field.success input,
+        .form-field.success select {
+            border-color: #4caf50 !important;
+            box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.1) !important;
+        }
+
+        /* Focus Styles for Accessibility */
+        .simple-tab:focus,
+        .simple-button:focus,
+        .form-field input:focus,
+        .form-field select:focus {
+            outline: 2px solid #1976d2;
+            outline-offset: 2px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="live-mode-container">
+        <!-- Header -->
+        <header class="live-mode-header">
+            <div class="header-left">
+                <h1 style="margin: 0; font-size: 20px; font-weight: 500;">CasesDash Live Mode</h1>
+                <div class="live-indicator">
+                    <div class="live-dot"></div>
+                    <span style="font-size: 12px;">LIVE</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="refresh-timer">
+                    Next refresh: <span id="refreshTimer">30s</span>
+                </div>
+                <button class="simple-button secondary" id="closeButton" title="Close Live Mode" style="padding: 8px 12px; min-height: 40px;">
+                    <i class="material-icons" style="font-size: 18px;">close</i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Simple Tab Navigation -->
+        <div class="tab-container">
+            <div class="simple-tab-bar">
+                <button class="simple-tab active" onclick="showTab('dashboard', this)">
+                    <i class="material-icons">dashboard</i>
+                    <span>Dashboard</span>
+                </button>
+                <button class="simple-tab" onclick="showTab('add-case', this)">
+                    <i class="material-icons">add</i>
+                    <span>Add New Case</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Content Container -->
+        <div class="content-container">
+            <!-- Dashboard Tab -->
+            <div id="dashboard" class="tab-content active">
+                <div id="dashboardContent">
+                    <!-- Immediate display without loading overlay -->
+                    <div class="dashboard-grid">
+                        <div class="stat-card">
+                            <div class="stat-value">5</div>
+                            <div class="stat-label">My Cases</div>
+                            <div class="stat-change positive">Active assignments</div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-value">12</div>
+                            <div class="stat-label">Open Cases</div>
+                            <div class="stat-change positive">Currently in progress</div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-value">3</div>
+                            <div class="stat-label">Closed Today</div>
+                            <div class="stat-change positive">Daily progress</div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-value">8h</div>
+                            <div class="stat-label">Avg Response Time</div>
+                            <div class="stat-change positive">Last 7 days</div>
+                        </div>
+                    </div>
+
+                    <div class="urgent-cases">
+                        <h3 class="section-title">
+                            <i class="material-icons">warning</i>
+                            Urgent Cases (1)
+                        </h3>
+                        <div class="case-item">
+                            <div class="case-id">SE-001</div>
+                            <div class="case-details">
+                                Status: Assigned | Sheet: Support Email | Open: 2025-05-25
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="activity-section">
+                        <h3 class="section-title">
+                            <i class="material-icons">update</i>
+                            Recent Activity
+                        </h3>
+                        <div class="activity-item">
+                            <div class="activity-icon">
+                                <i class="material-icons">add_circle</i>
+                            </div>
+                            <div class="activity-content">
+                                <div class="activity-text">New case #12345 opened</div>
+                                <div class="activity-time">5 minutes ago</div>
+                            </div>
+                        </div>
+                        <div class="activity-item">
+                            <div class="activity-icon">
+                                <i class="material-icons">check_circle</i>
+                            </div>
+                            <div class="activity-content">
+                                <div class="activity-text">Case #12344 resolved</div>
+                                <div class="activity-time">10 minutes ago</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="activity-section" style="margin-top: 24px;">
+                        <h3 class="section-title">
+                            <i class="material-icons">view_list</i>
+                            Sheet Summary
+                        </h3>
+                        <div class="activity-item">
+                            <div class="activity-icon">
+                                <i class="material-icons">table_chart</i>
+                            </div>
+                            <div class="activity-content">
+                                <div class="activity-text">
+                                    <strong>Support Email</strong>: 50 total, 8 open, 2 closed today
+                                </div>
+                                <div class="activity-time">1 urgent case</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Add New Case Tab -->
+            <div id="add-case" class="tab-content">
+                <div class="add-case-form">
+                    <h2 class="section-title">
+                        <i class="material-icons">add_circle</i>
+                        Add New Case
+                    </h2>
+
+                    <div id="addCaseMessages"></div>
+
+                    <form id="newCaseForm" onsubmit="return handleFormSubmit(event)">
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="sheetType">Sheet Type *</label>
+                                <select id="sheetType" name="sheetType" required>
+                                    <option value="">Select Sheet Type</option>
+                                    <option value="Support Email">Support Email</option>
+                                    <option value="Support Chat">Support Chat</option>
+                                    <option value="Support Phone">Support Phone</option>
+                                    <option value="OT Email">OT Email</option>
+                                    <option value="OT Chat">OT Chat</option>
+                                    <option value="OT Phone">OT Phone</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="caseId">Case ID *</label>
+                                <input type="text" id="caseId" name="caseId" required>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="caseOpenDate">Case Open Date *</label>
+                                <input type="date" id="caseOpenDate" name="caseOpenDate" required>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="caseOpenTime">Case Open Time *</label>
+                                <input type="time" id="caseOpenTime" name="caseOpenTime" required>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="incomingSegment">Incoming Segment *</label>
+                                <select id="incomingSegment" name="incomingSegment" required>
+                                    <option value="">Select Segment</option>
+                                    <option value="Platinum">Platinum</option>
+                                    <option value="Titanium">Titanium</option>
+                                    <option value="Gold">Gold</option>
+                                    <option value="Silver">Silver</option>
+                                    <option value="Bronze - Low">Bronze - Low</option>
+                                    <option value="Bronze - High">Bronze - High</option>
+                                </select>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="productCategory">Product Category *</label>
+                                <select id="productCategory" name="productCategory" required>
+                                    <option value="">Select Category</option>
+                                    <option value="Search">Search</option>
+                                    <option value="Display">Display</option>
+                                    <option value="Video">Video</option>
+                                    <option value="Commerce">Commerce</option>
+                                    <option value="Apps">Apps</option>
+                                    <option value="M&A">M&A</option>
+                                    <option value="Policy">Policy</option>
+                                    <option value="Billing">Billing</option>
+                                    <option value="Other">Other</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-field">
+                                <label for="firstAssignee">1st Assignee *</label>
+                                <input type="email" id="firstAssignee" name="firstAssignee" required>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="caseStatus">Case Status</label>
+                                <select id="caseStatus" name="caseStatus">
+                                    <option value="">Select Status</option>
+                                    <option value="Assigned">Assigned</option>
+                                    <option value="Solution Offered">Solution Offered</option>
+                                    <option value="Finished">Finished</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 24px; display: flex; gap: 16px;">
+                            <button type="submit" class="simple-button primary">
+                                Create Case
+                            </button>
+
+                            <button type="button" class="simple-button secondary" onclick="resetForm()">
+                                Reset
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Resize Handle -->
+    <div class="resize-handle" id="resizeHandle"></div>
+
+    <!-- LiveModeController JavaScript -->
+    <script src="js/LiveModeController.js"></script>
+
+    <!-- Simple JavaScript - No MDC Dependencies -->
+    <script>
+        console.log('🚀 Live Mode Loading - No Spinners!');
+
+        // Simple tab switching function
+        function showTab(tabName, buttonElement) {
+            console.log('📱 Switching to tab:', tabName);
+
+            // Hide all tab contents
+            var tabs = document.querySelectorAll('.tab-content');
+            tabs.forEach(function (tab) {
+                tab.classList.remove('active');
+            });
+
+            // Remove active class from all tab buttons
+            var buttons = document.querySelectorAll('.simple-tab');
+            buttons.forEach(function (button) {
+                button.classList.remove('active');
+            });
+
+            // Show selected tab
+            var targetTab = document.getElementById(tabName);
+            if (targetTab) {
+                targetTab.classList.add('active');
+            }
+
+            // Add active class to clicked button
+            if (buttonElement) {
+                buttonElement.classList.add('active');
+            }
+        }
+
+        // Simple form handler
+        function handleFormSubmit(event) {
+            event.preventDefault();
+            console.log('📋 Form submitted');
+
+            var messageContainer = document.getElementById('addCaseMessages');
+            if (messageContainer) {
+                messageContainer.innerHTML = '<div class="success-message">Case created successfully! (Demo mode)</div>';
+                setTimeout(function () {
+                    messageContainer.innerHTML = '';
+                }, 3000);
+            }
+
+            event.target.reset();
+            return false;
+        }
+
+        // Reset form function
+        function resetForm() {
+            var form = document.getElementById('newCaseForm');
+            if (form) {
+                form.reset();
+                document.getElementById('addCaseMessages').innerHTML = '';
+            }
+        }
+
+        // Enhanced close button functionality
+        document.addEventListener('DOMContentLoaded', function () {
+            const closeButton = document.getElementById('closeButton');
+            if (closeButton) {
+                closeButton.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    if (window.liveModeController) {
+                        window.liveModeController.closeLiveMode();
+                    } else {
+                        window.close();
+                    }
+                });
+            }
+
+            // Set up manual refresh button (if needed)
+            const refreshButton = document.createElement('button');
+            refreshButton.className = 'mdc-icon-button';
+            refreshButton.innerHTML = '<i class="material-icons">refresh</i>';
+            refreshButton.title = 'Manual Refresh (Ctrl+R)';
+            refreshButton.style.marginRight = '8px';
+            refreshButton.addEventListener('click', function () {
+                if (window.liveModeController) {
+                    window.liveModeController.manualRefresh();
+                }
+            });
+
+            const headerRight = document.querySelector('.header-right');
+            if (headerRight) {
+                headerRight.insertBefore(refreshButton, headerRight.firstChild);
+            }
+
+            // Initialize default form values
+            const today = new Date();
+            const dateField = document.getElementById('caseOpenDate');
+            const timeField = document.getElementById('caseOpenTime');
+
+            if (dateField && !dateField.value) {
+                dateField.value = today.toISOString().split('T')[0];
+            }
+
+            if (timeField && !timeField.value) {
+                timeField.value = today.toTimeString().split(' ')[0].slice(0, 5);
+            }
+        });
+
+        // Touch/mobile optimizations
+        if ('ontouchstart' in window) {
+            document.body.classList.add('touch-device');
+
+            // Add mobile-specific styles
+            const style = document.createElement('style');
+            style.textContent = `
+                .touch-device .simple-tab {
+                    min-height: 48px;
+                    padding: 12px 16px;
+                }
+                
+                .touch-device .stat-card {
+                    padding: 20px;
+                }
+                
+                .touch-device .form-field input,
+                .touch-device .form-field select {
+                    min-height: 44px;
+                    font-size: 16px; /* Prevents zoom on iOS */
+                }
+                
+                .touch-device .simple-button {
+                    min-height: 44px;
+                    padding: 12px 24px;
+                }
+                
+                @media (max-width: 1024px) {
+                    .dashboard-grid {
+                        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                        gap: 12px;
+                    }
+                    
+                    .content-container {
+                        padding: 12px;
+                    }
+                    
+                    .form-row {
+                        grid-template-columns: 1fr;
+                        gap: 12px;
+                    }
+                }
+                
+                @media (orientation: landscape) and (max-width: 1024px) {
+                    .dashboard-grid {
+                        grid-template-columns: repeat(2, 1fr);
+                    }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // Window resize handler for responsive updates
+        window.addEventListener('resize', function () {
+            // Update layout based on window size
+            const width = window.innerWidth;
+            const container = document.querySelector('.live-mode-container');
+
+            if (width < 768) {
+                container.classList.add('mobile-layout');
+            } else {
+                container.classList.remove('mobile-layout');
+            }
+
+            if (width >= 768 && width <= 1024) {
+                container.classList.add('tablet-layout');
+            } else {
+                container.classList.remove('tablet-layout');
+            }
+        });
+
+        // Trigger initial resize
+        window.dispatchEvent(new Event('resize'));
+
+        // Prevent form submission if validation fails
+        document.addEventListener('submit', function (e) {
+            if (e.target.id === 'newCaseForm') {
+                const form = e.target;
+                const requiredFields = form.querySelectorAll('[required]');
+                let isValid = true;
+
+                requiredFields.forEach(field => {
+                    if (!field.value.trim()) {
+                        isValid = false;
+                        field.style.borderColor = '#f44336';
+                    } else {
+                        field.style.borderColor = '';
+                    }
+                });
+
+                if (!isValid) {
+                    e.preventDefault();
+                    const firstInvalid = form.querySelector('[style*="border-color: rgb(244, 67, 54)"]');
+                    if (firstInvalid) {
+                        firstInvalid.focus();
+                        firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                }
+            }
+        });
+
+        console.log('✅ CasesDash Live Mode - Loaded Successfully with Enhanced Features');
+    </script>
+</body>
+
+</html>
