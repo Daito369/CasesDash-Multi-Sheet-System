@@ -465,8 +465,7 @@ class ErrorHandler {
       .replace(/'/g, '&#x27;')
       .replace(/\//g, '&#x2F;');
   }
-}
-
+  
   /**
    * Check if current user is admin for security purposes
    * @returns {boolean} True if user is admin
