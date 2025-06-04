@@ -51,7 +51,7 @@ class SecurityConfig {
       allowedFileTypes: ['pdf', 'txt', 'csv', 'xlsx'],
       maxFileSize: 10 * 1024 * 1024, // 10MB
       sqlInjectionPatterns: [
-        /('|(\\';)|(;)|(--)|(\/\*)|(\*\/)|(\bselect\b)|(\binsert\b)|(\bupdate\b)|(\bdelete\b)|(\bdrop\b)|(\bcreate\b)|(\balter\b)|(\bexec\b)|(\bunion\b)|(\bscript\b)/i
+        /('|\\';|;|--|\/\*|\*\/|\bselect\b|\binsert\b|\bupdate\b|\bdelete\b|\bdrop\b|\bcreate\b|\balter\b|\bexec\b|\bunion\b|\bscript\b)/i
       ],
       xssPatterns: [
         /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
