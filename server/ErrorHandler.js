@@ -108,12 +108,16 @@ class ErrorHandler {
         timestamp: new Date().toISOString()
       };
       
-      // Add technical details if requested
-      if (showTechnicalDetails) {
+      // Add technical details only for admin users to prevent information disclosure
+      if (showTechnicalDetails && this.isAdminUser()) {
         response.technicalDetails = {
           originalMessage: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : null
+          stack: error instanceof Error ? this.sanitizeStackTrace(error.stack) : null
         };
+      } else if (showTechnicalDetails) {
+        // Non-admin users get limited technical details
+        response.errorId = this.generateErrorId();
+        response.message = 'An error occurred. Please contact support with error ID: ' + response.errorId;
       }
       
       return response;
@@ -460,6 +464,92 @@ class ErrorHandler {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#x27;')
       .replace(/\//g, '&#x2F;');
+  }
+}
+
+  /**
+   * Check if current user is admin for security purposes
+   * @returns {boolean} True if user is admin
+   */
+  static isAdminUser() {
+    try {
+      const userEmail = Session.getActiveUser().getEmail();
+      const adminConfig = SecurityConfig.getAdminConfig();
+      return adminConfig.adminEmails.includes(userEmail) || 
+             adminConfig.superAdminEmails.includes(userEmail);
+    } catch (error) {
+      console.warn('Failed to check admin status:', error.message);
+      return false; // Default to non-admin for security
+    }
+  }
+  
+  /**
+   * Generate unique error ID for tracking
+   * @returns {string} Unique error ID
+   */
+  static generateErrorId() {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substr(2, 9);
+    return `ERR_${timestamp}_${random}`;
+  }
+  
+  /**
+   * Sanitize stack trace to remove sensitive information
+   * @param {string} stack - Original stack trace
+   * @returns {string} Sanitized stack trace
+   */
+  static sanitizeStackTrace(stack) {
+    if (!stack) return null;
+    
+    try {
+      // Remove file paths and sensitive information
+      return stack
+        .split('\n')
+        .map(line => {
+          // Remove full file paths, keep only function names and line numbers
+          return line.replace(/\/[^\/]*\//g, '').replace(/\([^)]*\)/g, '(...)');
+        })
+        .slice(0, 5) // Limit to first 5 lines
+        .join('\n');
+    } catch (error) {
+      return 'Stack trace sanitization failed';
+    }
+  }
+  
+  /**
+   * Validate and sanitize error context to prevent information leakage
+   * @param {Object} context - Error context
+   * @returns {Object} Sanitized context
+   */
+  static sanitizeErrorContext(context) {
+    if (!context) return {};
+    
+    try {
+      const sensitiveFields = ['password', 'token', 'apiKey', 'sessionId', 'secret', 'key'];
+      const sanitized = {};
+      
+      for (const [key, value] of Object.entries(context)) {
+        // Skip sensitive fields
+        if (sensitiveFields.some(field => key.toLowerCase().includes(field))) {
+          sanitized[key] = '[REDACTED]';
+          continue;
+        }
+        
+        // Sanitize string values
+        if (typeof value === 'string') {
+          sanitized[key] = value.length > 100 ? value.substring(0, 100) + '...' : value;
+        } else if (typeof value === 'object') {
+          sanitized[key] = '[OBJECT]';
+        } else {
+          sanitized[key] = value;
+        }
+      }
+      
+      return sanitized;
+      
+    } catch (error) {
+      return { sanitizationError: 'Failed to sanitize context' };
+    }
   }
 }
 

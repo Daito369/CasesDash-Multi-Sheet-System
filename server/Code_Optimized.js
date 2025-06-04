@@ -474,11 +474,15 @@ function getUserRole(userEmail) {
   // This is a simplified implementation - in production, roles would be stored in a database
   
   const adminEmails = [
-    // Add admin emails here
+    'admin@google.com',
+    'system-admin@google.com',
+    'casesdash-admin@google.com'
   ];
   
   const teamLeaderEmails = [
-    // Add team leader emails here
+    'team-lead@google.com',
+    'supervisor@google.com',
+    'manager@google.com'
   ];
   
   if (adminEmails.includes(userEmail)) {

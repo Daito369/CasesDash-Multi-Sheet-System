@@ -23,6 +23,19 @@ function createCase(caseDataOrSheetType, legacyCaseData = null, options = {}) {
       options: options
     });
     
+    // Security: Validate authentication first
+    const authResult = authenticateUser();
+    if (!authResult.success) {
+      console.warn('❌ [createCase] Authentication failed:', authResult.error);
+      return ErrorHandler.handleGracefully(
+        new Error('Authentication required'),
+        {
+          userMessage: 'You must be authenticated to create cases.',
+          type: ErrorTypes.AUTHENTICATION
+        }
+      );
+    }
+    
     let sheetType, caseData;
     
     // Handle both new and legacy calling conventions
@@ -41,18 +54,25 @@ function createCase(caseDataOrSheetType, legacyCaseData = null, options = {}) {
       throw new Error('Invalid parameters. Expected case data with sheetType or legacy format.');
     }
     
-    // Validate inputs
-    if (!sheetType) {
-      console.error('❌ [createCase] Sheet type is missing');
-      throw new Error('Sheet type is required');
+    // Security: Validate and sanitize inputs
+    const validationResult = InputValidator.validateCaseData(caseData, true);
+    if (!validationResult.isValid) {
+      console.error('❌ [createCase] Input validation failed:', validationResult.errors);
+      return ErrorHandler.handleGracefully(
+        new Error('Invalid input data'),
+        {
+          userMessage: `Input validation failed: ${validationResult.errors.join(', ')}`,
+          type: ErrorTypes.VALIDATION,
+          context: { validationErrors: validationResult.errors }
+        }
+      );
     }
     
-    if (!caseData || typeof caseData !== 'object') {
-      console.error('❌ [createCase] Case data is invalid:', caseData);
-      throw new Error('Case data is required');
-    }
+    // Use sanitized data
+    caseData = validationResult.sanitized;
+    sheetType = caseData.sheetType;
     
-    console.log('✅ [createCase] Parameters validated successfully');
+    console.log('✅ [createCase] Parameters validated and sanitized successfully');
     
     try {
       // Create optimized case model instance with error handling
