@@ -413,21 +413,31 @@ class LiveModeController {
       
       if (!this.autoRefreshEnabled) return;
       
-      // Start 30-second refresh interval
-      this.refreshIntervalId = setInterval(async () => {
-        await this._refreshDashboard();
+      // PERFORMANCE OPTIMIZATION: Intelligent refresh strategy
+      // Light refresh every 30 seconds (change detection only)
+      this.lightRefreshIntervalId = setInterval(async () => {
+        await this._lightRefreshCheck();
       }, 30000);
       
-      // Start countdown timer
-      this.secondsUntilRefresh = 30;
+      // Full refresh every 3 minutes (complete data reload)
+      this.fullRefreshIntervalId = setInterval(async () => {
+        await this._fullRefreshDashboard();
+      }, 180000);
+      
+      // Start countdown timer for light refresh
+      this.secondsUntilLightRefresh = 30;
       this.timerIntervalId = setInterval(() => {
-        this.secondsUntilRefresh--;
+        this.secondsUntilLightRefresh--;
         this._updateTimerDisplay();
         
-        if (this.secondsUntilRefresh <= 0) {
-          this.secondsUntilRefresh = 30;
+        if (this.secondsUntilLightRefresh <= 0) {
+          this.secondsUntilLightRefresh = 30;
         }
       }, 1000);
+      
+      // Initialize change detection
+      this.lastChangeTimestamp = Date.now();
+      this.changeDetectionCache = new Map();
       
       console.log('⏰ Auto-refresh started (30s interval)');
       
@@ -441,6 +451,18 @@ class LiveModeController {
    * @private
    */
   _stopAutoRefresh() {
+    // PERFORMANCE OPTIMIZATION: Clear both light and full refresh intervals
+    if (this.lightRefreshIntervalId) {
+      clearInterval(this.lightRefreshIntervalId);
+      this.lightRefreshIntervalId = null;
+    }
+    
+    if (this.fullRefreshIntervalId) {
+      clearInterval(this.fullRefreshIntervalId);
+      this.fullRefreshIntervalId = null;
+    }
+    
+    // Legacy support
     if (this.refreshIntervalId) {
       clearInterval(this.refreshIntervalId);
       this.refreshIntervalId = null;
@@ -470,17 +492,53 @@ class LiveModeController {
   }
 
   /**
-   * Refresh dashboard data from server
+   * PERFORMANCE OPTIMIZATION: Light refresh - only check for changes
    * @private
    * @returns {Promise<void>}
    */
-  async _refreshDashboard() {
+  async _lightRefreshCheck() {
     try {
       if (!this.sessionId) {
         throw new Error('No active session');
       }
       
-      console.log('🔄 Refreshing dashboard data...');
+      console.log('🔍 Light refresh - checking for changes...');
+      
+      // Get lightweight change detection data
+      const result = await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .getChangeDetectionData(this.sessionId, this.lastChangeTimestamp);
+      });
+      
+      if (result.success && result.hasChanges) {
+        console.log('🔄 Changes detected - triggering full refresh');
+        await this._fullRefreshDashboard();
+        this.lastChangeTimestamp = Date.now();
+      } else {
+        console.log('✅ No changes detected');
+      }
+      
+    } catch (error) {
+      console.warn('⚠️ Light refresh failed, will retry:', error);
+      // Fallback to full refresh on error
+      await this._fullRefreshDashboard();
+    }
+  }
+
+  /**
+   * PERFORMANCE OPTIMIZATION: Full refresh - complete data reload
+   * @private
+   * @returns {Promise<void>}
+   */
+  async _fullRefreshDashboard() {
+    try {
+      if (!this.sessionId) {
+        throw new Error('No active session');
+      }
+      
+      console.log('🔄 Full dashboard refresh...');
       
       const result = await new Promise((resolve, reject) => {
         google.script.run
@@ -492,23 +550,32 @@ class LiveModeController {
       if (result.success) {
         this._updateDashboardUI(result.data);
         this.lastDashboardData = result.data;
+        this.lastChangeTimestamp = Date.now();
         this.refreshFailures = 0;
-        console.log('✅ Dashboard refreshed successfully');
+        console.log('✅ Full dashboard refresh completed');
       } else {
         throw new Error(result.message || 'Failed to get dashboard data');
       }
       
     } catch (error) {
+      console.error('❌ Full dashboard refresh failed:', error);
       this.refreshFailures++;
-      console.error(`❌ Dashboard refresh failed (${this.refreshFailures}/${this.maxRefreshFailures}):`, error);
       
-      if (this.refreshFailures >= this.maxRefreshFailures) {
-        this._stopAutoRefresh();
-        this._showError('Auto-refresh stopped due to repeated failures. Please refresh manually.');
+      if (this.refreshFailures >= 3) {
+        console.error('❌ Multiple refresh failures, stopping auto-refresh');
+        this.stopAutoRefresh();
+        this._showConnectionError();
       }
-      
-      throw error;
     }
+  }
+
+  /**
+   * Legacy refresh method for backward compatibility
+   * @private
+   * @returns {Promise<void>}
+   */
+  async _refreshDashboard() {
+    return this._fullRefreshDashboard();
   }
 
   /**
