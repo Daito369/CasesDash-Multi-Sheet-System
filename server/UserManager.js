@@ -234,11 +234,11 @@ function getUserPermissions(role) {
 }
 
 /**
- * Generate a unique session ID
- * @returns {string} Session ID
+ * Generate a cryptographically secure session ID
+ * @returns {string} Secure session ID
  */
 function generateSessionId() {
-  return 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+  return SecurityUtils.generateSecureSessionId();
 }
 
 /**
@@ -661,24 +661,8 @@ function getCurrentUserInfo() {
     
     console.log('🔍 Getting user info for:', userEmail);
     
-    // Developer special access: past.and.future37@gmail.com gets same rights as user@google.com
-    if (userEmail === 'past.and.future37@gmail.com') {
-      console.log('✅ Developer access granted for:', userEmail);
-      return {
-        success: true,
-        email: userEmail,
-        displayEmail: 'user@google.com (Developer Access)',
-        role: 'Administrator (Developer)',
-        permissions: getUserPermissions('admin'),
-        lastLogin: new Date().toLocaleString('ja-JP'),
-        isDeveloper: true,
-        authenticated: true,
-        ldap: 'developer',
-        department: 'Development',
-        location: 'Development Environment',
-        accessLevel: 'full'
-      };
-    }
+    // Security: All access must be through @google.com domain only
+    // Developer access removed for security compliance
     
     // Standard @google.com domain validation
     if (!userEmail || !userEmail.endsWith('@google.com')) {
