@@ -49,6 +49,9 @@ if (typeof window !== 'undefined') {
       // Initialize Material Design components
       initializeMDC();
       
+      // Initialize security and session monitoring
+      initializeSessionMonitoring();
+      
       // Load initial data
       await loadInitialData();
       
@@ -969,19 +972,284 @@ if (typeof window !== 'undefined') {
   }
 
   /**
-   * Call server function
+   * Enhanced server communication with comprehensive security
    */
-  function callServerFunction(functionName, ...args) {
-    return new Promise((resolve, reject) => {
+  let currentCSRFToken = null;
+  let tokenExpiry = null;
+  let sessionCheckInterval = null;
+
+  /**
+   * Enhanced server function caller with security features
+   */
+  async function callServerFunction(functionName, ...args) {
+    return new Promise(async (resolve, reject) => {
       try {
+        // Get or refresh CSRF token
+        const csrfToken = await getCSRFToken();
+        
+        // Validate session before making call
+        const sessionValid = await validateSession();
+        if (!sessionValid) {
+          handleSessionExpiry();
+          reject(new Error('Session expired. Please login again.'));
+          return;
+        }
+        
+        // Create security context
+        const securityContext = {
+          csrfToken: csrfToken,
+          sessionId: getCurrentSessionId(),
+          timestamp: Date.now(),
+          userAgent: navigator.userAgent,
+          fingerprint: generateClientFingerprint()
+        };
+        
         google.script.run
-          .withSuccessHandler(resolve)
-          .withFailureHandler(reject)
-          [functionName](...args);
+          .withSuccessHandler((response) => {
+            handleSecureResponse(response, resolve, reject);
+          })
+          .withFailureHandler((error) => {
+            handleSecureError(error, reject, functionName, args);
+          })
+          [functionName](securityContext, ...args);
+          
       } catch (error) {
+        console.error('Security-enhanced call failed:', error);
         reject(error);
       }
     });
+  }
+
+  /**
+   * Get or refresh CSRF token
+   */
+  async function getCSRFToken() {
+    if (currentCSRFToken && tokenExpiry && Date.now() < tokenExpiry) {
+      return currentCSRFToken;
+    }
+    
+    try {
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler((response) => {
+            if (response && response.token) {
+              currentCSRFToken = response.token;
+              tokenExpiry = response.expiresAt || (Date.now() + 30 * 60 * 1000); // 30 minutes default
+              resolve(currentCSRFToken);
+            } else {
+              reject(new Error('Invalid CSRF token response'));
+            }
+          })
+          .withFailureHandler(reject)
+          .generateCSRFToken();
+      });
+    } catch (error) {
+      console.error('Failed to get CSRF token:', error);
+      throw new Error('Security token unavailable');
+    }
+  }
+
+  /**
+   * Get current session ID
+   */
+  function getCurrentSessionId() {
+    return sessionStorage.getItem('casesdash_session_id') || 
+           localStorage.getItem('casesdash_session_id') || 
+           null;
+  }
+
+  /**
+   * Set session ID
+   */
+  function setSessionId(sessionId) {
+    sessionStorage.setItem('casesdash_session_id', sessionId);
+    localStorage.setItem('casesdash_session_id', sessionId);
+  }
+
+  /**
+   * Validate current session
+   */
+  async function validateSession() {
+    try {
+      const sessionId = getCurrentSessionId();
+      if (!sessionId) {
+        return false;
+      }
+      
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler((response) => {
+            if (response && response.valid) {
+              // Update session expiry warning
+              if (response.timeToExpiry && response.timeToExpiry < 600000) { // 10 minutes
+                showSessionWarning(response.timeToExpiry);
+              }
+              
+              // Handle session rotation
+              if (response.rotated && response.newSessionId) {
+                setSessionId(response.newSessionId);
+                console.log('Session automatically rotated for security');
+              }
+              
+              resolve(true);
+            } else {
+              resolve(false);
+            }
+          })
+          .withFailureHandler((error) => {
+            console.error('Session validation failed:', error);
+            resolve(false);
+          })
+          .validateUserSession(sessionId, {
+            userAgent: navigator.userAgent,
+            timestamp: Date.now(),
+            action: 'session_check'
+          });
+      });
+    } catch (error) {
+      console.error('Session validation error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Generate client fingerprint for security
+   */
+  function generateClientFingerprint() {
+    const components = [
+      navigator.userAgent || '',
+      navigator.language || '',
+      screen.width + 'x' + screen.height,
+      Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+      navigator.hardwareConcurrency || '',
+      navigator.platform || ''
+    ];
+    
+    return btoa(components.join('|')).substring(0, 32);
+  }
+
+  /**
+   * Handle secure response from server
+   */
+  function handleSecureResponse(response, resolve, reject) {
+    try {
+      // Check for security alerts
+      if (response && response.securityAlert) {
+        console.warn('Security alert:', response.securityAlert);
+        showSecurityAlert(response.securityAlert);
+      }
+      
+      // Handle session renewal
+      if (response && response.sessionRenewed && response.newSessionId) {
+        console.log('Session automatically renewed');
+        setSessionId(response.newSessionId);
+      }
+      
+      resolve(response);
+    } catch (error) {
+      console.error('Response handling failed:', error);
+      reject(error);
+    }
+  }
+
+  /**
+   * Handle secure errors from server
+   */
+  function handleSecureError(error, reject, functionName, args) {
+    console.error('Secure call failed:', error);
+    
+    // Handle specific security errors
+    if (error.message && error.message.includes('CSRF')) {
+      currentCSRFToken = null;
+      tokenExpiry = null;
+      showError('Security token expired. Please try again.');
+    } else if (error.message && error.message.includes('Session')) {
+      handleSessionExpiry();
+    } else if (error.message && error.message.includes('Rate limit')) {
+      showError('Too many requests. Please wait before trying again.');
+    }
+    
+    reject(error);
+  }
+
+  /**
+   * Initialize session monitoring
+   */
+  function initializeSessionMonitoring() {
+    // Check session every 5 minutes
+    if (sessionCheckInterval) {
+      clearInterval(sessionCheckInterval);
+    }
+    
+    sessionCheckInterval = setInterval(async () => {
+      const valid = await validateSession();
+      if (!valid) {
+        handleSessionExpiry();
+      }
+    }, 300000); // 5 minutes
+  }
+
+  /**
+   * Handle session expiry
+   */
+  function handleSessionExpiry() {
+    if (sessionCheckInterval) {
+      clearInterval(sessionCheckInterval);
+    }
+    
+    // Clear session data
+    sessionStorage.removeItem('casesdash_session_id');
+    localStorage.removeItem('casesdash_session_id');
+    currentCSRFToken = null;
+    tokenExpiry = null;
+    
+    showError('Your session has expired. The page will reload to login again.');
+    
+    // Redirect to login after showing message
+    setTimeout(() => {
+      window.location.reload();
+    }, 3000);
+  }
+
+  /**
+   * Show session warning
+   */
+  function showSessionWarning(timeToExpiry) {
+    const minutes = Math.floor(timeToExpiry / 60000);
+    showWarning(`Your session will expire in ${minutes} minutes. Save your work.`);
+  }
+
+  /**
+   * Show security alert
+   */
+  function showSecurityAlert(message) {
+    const alert = document.createElement('div');
+    alert.className = 'security-alert';
+    alert.innerHTML = `
+      <div class="alert-content">
+        <span class="material-symbols-outlined">shield</span>
+        <span>Security Alert: ${message}</span>
+      </div>
+    `;
+    alert.style.cssText = `
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 8px;
+      padding: 16px;
+      z-index: 10000;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    `;
+    
+    document.body.appendChild(alert);
+    
+    setTimeout(() => {
+      if (alert.parentNode) {
+        alert.parentNode.removeChild(alert);
+      }
+    }, 10000);
   }
 
   /**

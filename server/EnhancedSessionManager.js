@@ -136,6 +136,9 @@ class EnhancedSessionManager {
    */
   validateSession(sessionId, context = {}) {
     try {
+      // Perform manual cleanup if triggers are not available
+      this.performManualCleanupIfNeeded();
+      
       const session = this.getSession(sessionId);
       
       if (!session) {
@@ -889,18 +892,77 @@ class EnhancedSessionManager {
   }
 
   /**
-   * Start periodic tasks
+   * Start periodic tasks using GAS-compatible triggers
    */
   startPeriodicTasks() {
-    // Cleanup expired sessions every 5 minutes
-    setInterval(() => {
-      this.cleanupExpiredSessions();
-    }, 5 * 60 * 1000);
+    try {
+      // Use GAS Time-based triggers instead of setInterval
+      this.createPeriodicTriggers();
+    } catch (error) {
+      console.warn('Could not create time-based triggers:', error);
+      // Fallback to manual cleanup on each operation
+      this.useManualCleanup = true;
+    }
+  }
 
-    // Security monitoring every minute
-    setInterval(() => {
-      this.securityMonitor.performPeriodicCheck();
-    }, 60 * 1000);
+  /**
+   * Create GAS-compatible time-based triggers
+   */
+  createPeriodicTriggers() {
+    try {
+      // Delete any existing triggers first
+      this.deleteExistingTriggers();
+      
+      // Create cleanup trigger (every 10 minutes)
+      ScriptApp.newTrigger('performSessionCleanup')
+        .timeBased()
+        .everyMinutes(10)
+        .create();
+      
+      // Create security check trigger (every 5 minutes)
+      ScriptApp.newTrigger('performSecurityCheck')
+        .timeBased()
+        .everyMinutes(5)
+        .create();
+        
+      console.log('Time-based triggers created successfully');
+    } catch (error) {
+      console.warn('Failed to create triggers:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete existing session management triggers
+   */
+  deleteExistingTriggers() {
+    try {
+      const triggers = ScriptApp.getProjectTriggers();
+      triggers.forEach(trigger => {
+        const handlerFunction = trigger.getHandlerFunction();
+        if (handlerFunction === 'performSessionCleanup' || 
+            handlerFunction === 'performSecurityCheck') {
+          ScriptApp.deleteTrigger(trigger);
+        }
+      });
+    } catch (error) {
+      console.warn('Failed to delete existing triggers:', error);
+    }
+  }
+
+  /**
+   * Manual cleanup fallback (called on each operation if triggers fail)
+   */
+  performManualCleanupIfNeeded() {
+    if (this.useManualCleanup) {
+      const now = Date.now();
+      // Only run cleanup every 10 minutes to avoid performance impact
+      if (!this.lastManualCleanup || now - this.lastManualCleanup > 10 * 60 * 1000) {
+        this.cleanupExpiredSessions();
+        this.securityMonitor.performPeriodicCheck();
+        this.lastManualCleanup = now;
+      }
+    }
   }
 
   /**
@@ -1231,4 +1293,23 @@ function updateSessionActivity(sessionId, context = {}) {
 
 function expireUserSession(sessionId, reason = 'MANUAL') {
   return enhancedSessionManager.expireSession(sessionId, reason);
+}
+
+// Global functions for GAS time-based triggers
+function performSessionCleanup() {
+  try {
+    enhancedSessionManager.cleanupExpiredSessions();
+    console.log('Scheduled session cleanup completed');
+  } catch (error) {
+    console.error('Scheduled session cleanup failed:', error);
+  }
+}
+
+function performSecurityCheck() {
+  try {
+    enhancedSessionManager.securityMonitor.performPeriodicCheck();
+    console.log('Scheduled security check completed');
+  } catch (error) {
+    console.error('Scheduled security check failed:', error);
+  }
 }
