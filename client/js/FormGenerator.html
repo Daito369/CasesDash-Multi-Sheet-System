@@ -226,6 +226,14 @@ if (typeof window !== 'undefined') {
           required: false
         });
         
+        // Add TRT(P95) exclusion settings group
+        groups.push({
+          title: 'TRT(P95) Exclusion Settings',
+          fields: ['bug', 'l2Consulted', 'tsConsulted', 'idtBlocked', 'payreqBlocked'],
+          required: false,
+          conditional: true
+        });
+        
         return groups.filter(group =>
           group.fields.some(field => allFields.hasOwnProperty(field))
         );
@@ -258,9 +266,14 @@ if (typeof window !== 'undefined') {
         fieldsContainer.className = 'casesdash-form__group-fields';
         
         group.fields.forEach(fieldName => {
-          if (this.sheetMapper.getColumn(fieldName)) {
+          if (this.sheetMapper.getColumn(fieldName) || this.isExclusionField(fieldName)) {
             const fieldElement = this.createField(fieldName);
             if (fieldElement) {
+              // Add conditional visibility for segment-specific fields
+              if (this.isSegmentSpecificField(fieldName)) {
+                fieldElement.style.display = 'none';
+                fieldElement.setAttribute('data-segment-dependent', 'true');
+              }
               fieldsContainer.appendChild(fieldElement);
             }
           }
@@ -370,6 +383,32 @@ if (typeof window !== 'undefined') {
           triage: {
             type: 'checkbox',
             helpText: 'Check if case requires triage'
+          },
+          // TRT(P95) Exclusion Fields
+          bug: {
+            type: 'checkbox',
+            label: 'Bug Case (Blocked by)',
+            helpText: 'Check if case is blocked by a system bug (excludes from P95)'
+          },
+          l2Consulted: {
+            type: 'checkbox',
+            label: 'L2 Consulted',
+            helpText: 'Check if Level 2 support consultation is required (excludes from P95)'
+          },
+          tsConsulted: {
+            type: 'checkbox',
+            label: 'T&S Consulted',
+            helpText: 'Check if Trust & Safety consultation is required (Policy segment only)'
+          },
+          idtBlocked: {
+            type: 'checkbox',
+            label: 'IDT Blocked by',
+            helpText: 'Check if blocked by Identity verification issues (Billing segment only)'
+          },
+          payreqBlocked: {
+            type: 'checkbox',
+            label: 'Payreq Blocked by',
+            helpText: 'Check if blocked by Payment request processing (Billing segment only)'
           }
         };
         
@@ -377,13 +416,45 @@ if (typeof window !== 'undefined') {
       }
       
       /**
+       * Check if field is an exclusion field
+       * @private
+       * @param {string} fieldName - Field name
+       * @returns {boolean} Whether field is an exclusion field
+       */
+      isExclusionField(fieldName) {
+        return ['bug', 'l2Consulted', 'tsConsulted', 'idtBlocked', 'payreqBlocked'].includes(fieldName);
+      }
+      
+      /**
+       * Check if field is segment-specific
+       * @private
+       * @param {string} fieldName - Field name  
+       * @returns {boolean} Whether field is segment-specific
+       */
+      isSegmentSpecificField(fieldName) {
+        return ['tsConsulted', 'idtBlocked', 'payreqBlocked'].includes(fieldName);
+      }
+
+      /**
        * Get human-readable field label
        * @private
        * @param {string} fieldName - Field name
        * @returns {string} Field label
        */
       getFieldLabel(fieldName) {
-        return this.sheetMapper.getFieldDisplayName(fieldName);
+        // For exclusion fields, use the configured label
+        const config = this.getFieldConfiguration(fieldName);
+        if (config.label && this.isExclusionField(fieldName)) {
+          return config.label;
+        }
+        
+        // Try to get from SheetMapper, fallback to field name
+        if (this.sheetMapper.getFieldDisplayName) {
+          return this.sheetMapper.getFieldDisplayName(fieldName);
+        }
+        
+        // Default formatting for field names
+        return fieldName.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
       }
       
       /**
@@ -791,6 +862,46 @@ if (typeof window !== 'undefined') {
         if (this.options.enableRealTimeValidation) {
           this.setupRealTimeValidation(form);
         }
+        
+        // Setup segment-dependent field visibility
+        this.setupSegmentDependentFields(form);
+      }
+
+      /**
+       * Setup segment-dependent field visibility
+       * @private
+       * @param {HTMLElement} form - Form element
+       */
+      setupSegmentDependentFields(form) {
+        const incomingSegmentField = form.querySelector('[name="incomingSegment"]');
+        if (!incomingSegmentField) return;
+        
+        const updateSegmentFields = () => {
+          const selectedSegment = incomingSegmentField.value;
+          
+          // Hide all segment-specific fields first
+          const segmentFields = form.querySelectorAll('[data-segment-dependent="true"]');
+          segmentFields.forEach(field => {
+            field.style.display = 'none';
+          });
+          
+          // Show relevant fields based on segment
+          if (selectedSegment === 'Policy') {
+            const tsField = form.querySelector('[data-field="tsConsulted"]');
+            if (tsField) tsField.style.display = 'block';
+          } else if (selectedSegment === 'Billing') {
+            const idtField = form.querySelector('[data-field="idtBlocked"]');
+            const payreqField = form.querySelector('[data-field="payreqBlocked"]');
+            if (idtField) idtField.style.display = 'block';
+            if (payreqField) payreqField.style.display = 'block';
+          }
+        };
+        
+        // Update on change
+        incomingSegmentField.addEventListener('change', updateSegmentFields);
+        
+        // Update immediately
+        updateSegmentFields();
       }
 
       /**

@@ -773,6 +773,250 @@ class ConfigManager {
   }
 }
 
+/**
+ * Server-side configuration functions for Google Apps Script
+ * These functions are called from the client-side interface
+ */
+
+/**
+ * Get system configuration for the admin interface
+ * @returns {Object} Current system configuration
+ */
+function getSystemConfiguration() {
+  try {
+    console.log('Getting system configuration...');
+    
+    const config = {
+      // Spreadsheet configuration
+      spreadsheetId: ConfigManager.getSpreadsheetId(),
+      
+      // System settings
+      timezone: ConfigManager.getSystemSetting('timezone'),
+      language: ConfigManager.getSystemSetting('language'),
+      autoRefresh: ConfigManager.getSystemSetting('autoRefreshInterval') > 0,
+      refreshInterval: Math.floor((ConfigManager.getSystemSetting('autoRefreshInterval') || 30000) / 1000),
+      
+      // Notification settings
+      emailNotifications: ConfigManager.getNotificationSetting('enabled'),
+      desktopNotifications: ConfigManager.getUISetting('enableNotifications'),
+      notificationEmail: ConfigManager.getNotificationSetting('webhookUrl') ? 
+        extractEmailFromWebhook(ConfigManager.getNotificationSetting('webhookUrl')) : '',
+      
+      // Metadata
+      version: ConfigManager.getVersion(),
+      lastUpdate: ConfigManager.getLastUpdate()
+    };
+    
+    console.log('System configuration retrieved successfully');
+    return config;
+    
+  } catch (error) {
+    console.error('Failed to get system configuration:', error);
+    throw new Error(`Failed to retrieve configuration: ${error.message}`);
+  }
+}
+
+/**
+ * Save system configuration from the admin interface
+ * @param {Object} configData - Configuration data to save
+ * @returns {Object} Save result
+ */
+function saveSystemConfiguration(configData) {
+  try {
+    console.log('Saving system configuration...');
+    
+    if (!configData) {
+      throw new Error('Configuration data is required');
+    }
+    
+    // Validate required fields
+    if (!configData.spreadsheetId) {
+      throw new Error('Spreadsheet ID is required');
+    }
+    
+    // Validate spreadsheet access before saving
+    const validationResult = validateSpreadsheet(configData.spreadsheetId);
+    if (!validationResult.success) {
+      throw new Error(`Invalid spreadsheet: ${validationResult.message}`);
+    }
+    
+    // Save spreadsheet configuration
+    ConfigManager.setSpreadsheetId(configData.spreadsheetId);
+    
+    // Save system settings
+    if (configData.timezone) {
+      ConfigManager.setSystemSetting('timezone', configData.timezone);
+    }
+    if (configData.language) {
+      ConfigManager.setSystemSetting('language', configData.language);
+    }
+    if (typeof configData.autoRefresh === 'boolean') {
+      const intervalMs = configData.autoRefresh ? 
+        (configData.refreshInterval || 30) * 1000 : 0;
+      ConfigManager.setSystemSetting('autoRefreshInterval', intervalMs);
+    }
+    
+    // Save notification settings
+    if (typeof configData.emailNotifications === 'boolean') {
+      ConfigManager.setNotificationSetting('enabled', configData.emailNotifications);
+    }
+    if (typeof configData.desktopNotifications === 'boolean') {
+      ConfigManager.setUISetting('enableNotifications', configData.desktopNotifications);
+    }
+    if (configData.notificationEmail) {
+      // Convert email to webhook URL format if needed
+      const webhookUrl = configData.notificationEmail.includes('@') ? 
+        `mailto:${configData.notificationEmail}` : configData.notificationEmail;
+      ConfigManager.setNotificationSetting('webhookUrl', webhookUrl);
+    }
+    
+    // Update version and timestamp
+    ConfigManager.updateVersion('1.0.0');
+    
+    console.log('System configuration saved successfully');
+    
+    return {
+      success: true,
+      message: 'Configuration saved successfully',
+      spreadsheetId: configData.spreadsheetId
+    };
+    
+  } catch (error) {
+    console.error('Failed to save system configuration:', error);
+    return {
+      success: false,
+      message: error.message
+    };
+  }
+}
+
+/**
+ * Validate spreadsheet access and required sheets
+ * @param {string} spreadsheetId - Spreadsheet ID to validate
+ * @returns {Object} Validation result
+ */
+function validateSpreadsheet(spreadsheetId) {
+  try {
+    console.log(`Validating spreadsheet: ${spreadsheetId}`);
+    
+    if (!spreadsheetId) {
+      throw new Error('Spreadsheet ID is required');
+    }
+    
+    // Try to open the spreadsheet
+    let spreadsheet;
+    try {
+      spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+    } catch (error) {
+      console.error('Failed to open spreadsheet:', error);
+      throw new Error('Cannot access spreadsheet. Please check the ID and permissions.');
+    }
+    
+    // Get all sheet names
+    const sheets = spreadsheet.getSheets();
+    const existingSheets = sheets.map(sheet => sheet.getName());
+    
+    console.log('Found sheets:', existingSheets);
+    
+    // Required sheets for CasesDash
+    const requiredSheets = ['OT Email', '3PO Email', 'OT Chat', '3PO Chat', 'OT Phone', '3PO Phone'];
+    
+    // Check which required sheets are missing
+    const missingSheets = requiredSheets.filter(required => 
+      !existingSheets.includes(required)
+    );
+    
+    // Check which required sheets exist
+    const foundSheets = requiredSheets.filter(required => 
+      existingSheets.includes(required)
+    );
+    
+    const isValid = missingSheets.length === 0;
+    
+    const result = {
+      success: isValid,
+      spreadsheetId: spreadsheetId,
+      spreadsheetName: spreadsheet.getName(),
+      existingSheets: foundSheets,
+      missingSheets: missingSheets,
+      allSheets: existingSheets,
+      message: isValid ? 
+        'All required sheets found' : 
+        `Missing required sheets: ${missingSheets.join(', ')}`
+    };
+    
+    console.log('Spreadsheet validation result:', result);
+    return result;
+    
+  } catch (error) {
+    console.error('Spreadsheet validation failed:', error);
+    return {
+      success: false,
+      message: error.message,
+      existingSheets: [],
+      missingSheets: ['OT Email', '3PO Email', 'OT Chat', '3PO Chat', 'OT Phone', '3PO Phone']
+    };
+  }
+}
+
+/**
+ * Configure spreadsheet (used by setup.html)
+ * @param {string} spreadsheetId - Spreadsheet ID to configure
+ * @returns {Object} Configuration result
+ */
+function configureSpreadsheet(spreadsheetId) {
+  try {
+    console.log(`Configuring spreadsheet: ${spreadsheetId}`);
+    
+    // Validate the spreadsheet first
+    const validationResult = validateSpreadsheet(spreadsheetId);
+    
+    if (validationResult.success) {
+      // Save the spreadsheet ID if validation passed
+      ConfigManager.setSpreadsheetId(spreadsheetId);
+      ConfigManager.updateVersion('1.0.0');
+      
+      return {
+        success: true,
+        message: 'Spreadsheet configured successfully',
+        spreadsheetId: spreadsheetId,
+        availableSheets: validationResult.existingSheets
+      };
+    } else {
+      return {
+        success: false,
+        message: validationResult.message,
+        existingSheets: validationResult.existingSheets,
+        missingSheets: validationResult.missingSheets
+      };
+    }
+    
+  } catch (error) {
+    console.error('Failed to configure spreadsheet:', error);
+    return {
+      success: false,
+      message: error.message
+    };
+  }
+}
+
+/**
+ * Helper function to extract email from webhook URL
+ * @param {string} webhookUrl - Webhook URL
+ * @returns {string} Extracted email or empty string
+ */
+function extractEmailFromWebhook(webhookUrl) {
+  try {
+    if (webhookUrl && webhookUrl.startsWith('mailto:')) {
+      return webhookUrl.replace('mailto:', '');
+    }
+    return '';
+  } catch (error) {
+    console.error('Failed to extract email from webhook URL:', error);
+    return '';
+  }
+}
+
 // Export for use in other modules
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { ConfigManager, ConfigKeys, DefaultConfig };

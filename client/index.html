@@ -94,6 +94,93 @@
             margin-left: var(--md-space-2);
         }
         
+        /* Status Tabs (Spec 4.2.2) */
+        .status-tabs-container {
+            margin-bottom: var(--md-space-6);
+            border-bottom: 1px solid var(--current-surface-container-high);
+        }
+        
+        .status-tabs {
+            display: flex;
+            gap: var(--md-space-1);
+            overflow-x: auto;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+        
+        .status-tabs::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .status-tab {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: var(--md-space-1);
+            padding: var(--md-space-3) var(--md-space-4);
+            border: none;
+            background: none;
+            color: var(--current-on-surface-variant);
+            cursor: pointer;
+            border-radius: var(--md-radius-md) var(--md-radius-md) 0 0;
+            transition: all var(--md-motion-duration-short2) var(--md-motion-easing-standard);
+            position: relative;
+            min-width: 120px;
+            font: var(--md-label-large-font);
+            white-space: nowrap;
+        }
+        
+        .status-tab:hover {
+            background-color: var(--current-surface-container-high);
+            color: var(--current-on-surface);
+        }
+        
+        .status-tab.active {
+            background-color: var(--current-surface-container);
+            color: var(--md-primary-50);
+            border-bottom: 2px solid var(--md-primary-50);
+        }
+        
+        .status-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background-color: var(--md-primary-50);
+            border-radius: 1px 1px 0 0;
+        }
+        
+        .tab-label {
+            font-weight: 500;
+        }
+        
+        .tab-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 20px;
+            height: 20px;
+            background-color: var(--current-surface-container-highest);
+            color: var(--current-on-surface-variant);
+            font: var(--md-label-small-font);
+            font-weight: 600;
+            border-radius: var(--md-radius-full);
+            padding: 0 var(--md-space-1);
+            transition: all var(--md-motion-duration-short2) var(--md-motion-easing-standard);
+        }
+        
+        .status-tab.active .tab-count {
+            background-color: var(--md-primary-90);
+            color: var(--md-primary-20);
+        }
+        
+        [data-theme="dark"] .status-tab.active .tab-count {
+            background-color: var(--md-primary-30);
+            color: var(--md-primary-90);
+        }
+
         /* Table Container */
         .table-container {
             overflow-x: auto;
@@ -1621,6 +1708,32 @@
                                     </div>
                                 </div>
                                 <div class="card-body">
+                                    <!-- Status Tabs (Spec 4.2.2) -->
+                                    <div class="status-tabs-container">
+                                        <div class="status-tabs">
+                                            <button class="status-tab active" data-status="all" onclick="filterByStatus('all')">
+                                                <span class="tab-label">All Cases</span>
+                                                <span class="tab-count" id="all-count">0</span>
+                                            </button>
+                                            <button class="status-tab" data-status="Assigned" onclick="filterByStatus('Assigned')">
+                                                <span class="tab-label">Assigned</span>
+                                                <span class="tab-count" id="assigned-count">0</span>
+                                            </button>
+                                            <button class="status-tab" data-status="Solution Offered" onclick="filterByStatus('Solution Offered')">
+                                                <span class="tab-label">Solution Offered</span>
+                                                <span class="tab-count" id="solution-offered-count">0</span>
+                                            </button>
+                                            <button class="status-tab" data-status="Finished" onclick="filterByStatus('Finished')">
+                                                <span class="tab-label">Finished</span>
+                                                <span class="tab-count" id="finished-count">0</span>
+                                            </button>
+                                            <button class="status-tab" data-status="Closed" onclick="filterByStatus('Closed')">
+                                                <span class="tab-label">Closed</span>
+                                                <span class="tab-count" id="closed-count">0</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
                                     <!-- Search Bar -->
                                     <div class="search-container">
                                         <div class="search-input-wrapper">
@@ -2792,7 +2905,6 @@
         };
         window.showTeamManagement = function() { console.log('Team management requested'); };
         window.showAuditLogs = function() { console.log('Audit logs requested'); };
-        window.showSystemConfig = function() { console.log('System config requested'); };
         // User Menu Functions - Enhanced implementations
         window.showUserProfile = function() {
             console.log('👤 User profile requested');
