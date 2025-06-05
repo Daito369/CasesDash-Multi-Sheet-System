@@ -1693,6 +1693,203 @@ class NotificationManager {
       );
     }
   }
+
+  /**
+   * Enhanced team targeting for P95 alerts (Spec 6.1)
+   * @param {string} assigneeEmail - The case assignee's email
+   * @param {string} segment - Case segment (Policy, Billing, etc.)
+   * @returns {Array} Array of team leaders to notify
+   */
+  getTeamLeadersForP95Alert(assigneeEmail, segment = '') {
+    try {
+      // Get team configuration from properties
+      const teamConfig = this._getTeamConfiguration();
+      
+      // Extract team/department from assignee email
+      const assigneeTeam = this._extractTeamFromEmail(assigneeEmail);
+      
+      let teamLeaders = [];
+      
+      // Try to find team-specific leaders first
+      if (teamConfig && teamConfig[assigneeTeam]) {
+        const teamSettings = teamConfig[assigneeTeam];
+        
+        // Add team hierarchy (PL > TL > JTL > QM > WFM)
+        if (teamSettings.PL) teamLeaders.push(teamSettings.PL);
+        if (teamSettings.TL) teamLeaders.push(teamSettings.TL);
+        if (teamSettings.JTL) teamLeaders.push(teamSettings.JTL);
+        if (teamSettings.QM) teamLeaders.push(teamSettings.QM);
+        if (teamSettings.WFM) teamLeaders.push(teamSettings.WFM);
+      }
+      
+      // Add segment-specific escalation if applicable
+      if (segment === 'Policy' && teamConfig?.escalation?.policy) {
+        teamLeaders.push(...teamConfig.escalation.policy);
+      } else if (segment === 'Billing' && teamConfig?.escalation?.billing) {
+        teamLeaders.push(...teamConfig.escalation.billing);
+      }
+      
+      // Add global escalation contacts
+      if (teamConfig?.global?.escalation) {
+        teamLeaders.push(...teamConfig.global.escalation);
+      }
+      
+      // Remove duplicates and invalid emails
+      teamLeaders = [...new Set(teamLeaders)].filter(email => this._isValidEmail(email));
+      
+      // Fallback to default team leaders if none found
+      if (teamLeaders.length === 0) {
+        teamLeaders = this._getDefaultTeamLeaders();
+      }
+      
+      console.log(`📧 P95 Alert Recipients for ${assigneeEmail} (${segment}):`, teamLeaders);
+      return teamLeaders;
+      
+    } catch (error) {
+      console.error('Failed to get team leaders for P95 alert:', error);
+      return this._getDefaultTeamLeaders();
+    }
+  }
+
+  /**
+   * Get team configuration from properties service
+   * @private
+   * @returns {Object} Team configuration object
+   */
+  _getTeamConfiguration() {
+    try {
+      const configStr = PropertiesService.getScriptProperties().getProperty('TEAM_CONFIGURATION');
+      if (configStr) {
+        return JSON.parse(configStr);
+      }
+      
+      // Return default configuration structure
+      return {
+        global: {
+          escalation: ['admin@google.com', 'supervisor@google.com']
+        },
+        escalation: {
+          policy: ['policy-lead@google.com'],
+          billing: ['billing-lead@google.com']
+        },
+        teams: {
+          'support-team-a': {
+            PL: 'pl-team-a@google.com',
+            TL: 'tl-team-a@google.com',
+            JTL: 'jtl-team-a@google.com',
+            QM: 'qm-team-a@google.com',
+            WFM: 'wfm-team-a@google.com'
+          },
+          'support-team-b': {
+            PL: 'pl-team-b@google.com',
+            TL: 'tl-team-b@google.com',
+            JTL: 'jtl-team-b@google.com',
+            QM: 'qm-team-b@google.com',
+            WFM: 'wfm-team-b@google.com'
+          }
+        }
+      };
+    } catch (error) {
+      console.error('Failed to get team configuration:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Extract team name from email address
+   * @private
+   * @param {string} email - Email address
+   * @returns {string} Team name
+   */
+  _extractTeamFromEmail(email) {
+    try {
+      // Extract username part from email
+      const username = email.split('@')[0];
+      
+      // Try to identify team from username patterns
+      if (username.includes('team-a') || username.includes('teama')) {
+        return 'support-team-a';
+      } else if (username.includes('team-b') || username.includes('teamb')) {
+        return 'support-team-b';
+      } else if (username.includes('policy')) {
+        return 'policy-team';
+      } else if (username.includes('billing')) {
+        return 'billing-team';
+      }
+      
+      // Default team
+      return 'support-team-a';
+    } catch (error) {
+      console.error('Failed to extract team from email:', error);
+      return 'support-team-a';
+    }
+  }
+
+  /**
+   * Send P95 alert with enhanced team targeting
+   * @param {Object} caseData - Case data object
+   * @returns {Promise<Object>} Notification result
+   */
+  async sendP95Alert(caseData) {
+    try {
+      const { caseId, finalAssignee, incomingSegment, timeRemaining } = caseData;
+      
+      // Get appropriate team leaders
+      const recipients = this.getTeamLeadersForP95Alert(finalAssignee, incomingSegment);
+      
+      // Create notification data
+      const notificationData = {
+        type: 'trt_alert',
+        templateKey: 'trt_critical',
+        recipients: recipients,
+        data: {
+          caseId: caseId,
+          assignee: finalAssignee,
+          segment: incomingSegment,
+          timeRemaining: timeRemaining,
+          urgencyLevel: 'CRITICAL',
+          timestamp: new Date().toISOString()
+        }
+      };
+      
+      // Send notification
+      const result = await this.sendNotification(notificationData);
+      
+      console.log(`🚨 P95 Alert sent for case ${caseId} to ${recipients.length} team leaders`);
+      return result;
+      
+    } catch (error) {
+      console.error('Failed to send P95 alert:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Update team configuration (Admin only)
+   * @param {Object} newConfig - New team configuration
+   * @returns {Object} Update result
+   */
+  updateTeamConfiguration(newConfig) {
+    try {
+      // Validate configuration structure
+      if (!newConfig || typeof newConfig !== 'object') {
+        throw new Error('Invalid team configuration provided');
+      }
+      
+      // Store in properties service
+      PropertiesService.getScriptProperties().setProperty(
+        'TEAM_CONFIGURATION', 
+        JSON.stringify(newConfig)
+      );
+      
+      console.log('✅ Team configuration updated successfully');
+      return { success: true, message: 'Team configuration updated successfully' };
+      
+    } catch (error) {
+      console.error('Failed to update team configuration:', error);
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 // Create global instance
