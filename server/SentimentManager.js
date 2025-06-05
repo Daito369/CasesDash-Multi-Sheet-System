@@ -16,7 +16,7 @@ class SentimentManager {
   /**
    * Constructor
    */
-  constructor() {
+  constructor(options = {}) {
     this.sheetName = 'SentimentScores';
     this.privacyManager = new PrivacyManager();
     this.currentUser = Session.getActiveUser().getEmail();
@@ -31,14 +31,21 @@ class SentimentManager {
       default: 5.0
     };
     
-    this.initializeSheet();
+    // Use client-side storage instead of spreadsheet by default
+    this.useClientStorage = options.useClientStorage !== false;
+    
+    // Only initialize sheet if explicitly requested
+    if (!this.useClientStorage && options.createSheetIfMissing) {
+      this.initializeSheet();
+    }
   }
   
   /**
-   * Initialize sentiment scores sheet if it doesn't exist
+   * Initialize sentiment scores sheet only when explicitly needed
    * @private
+   * @param {boolean} createIfMissing - Whether to create sheet if missing
    */
-  initializeSheet() {
+  initializeSheet(createIfMissing = false) {
     try {
       const spreadsheetId = ConfigManager.getSpreadsheetId();
       if (!spreadsheetId) {
@@ -48,17 +55,20 @@ class SentimentManager {
       const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
       let sheet = spreadsheet.getSheetByName(this.sheetName);
       
-      if (!sheet) {
+      if (!sheet && createIfMissing) {
+        console.log(`Creating SentimentScores sheet as explicitly requested`);
         sheet = spreadsheet.insertSheet(this.sheetName);
         this.setupSheetHeaders(sheet);
       }
       
       this.sheet = sheet;
+      return { success: true, sheetExists: !!sheet };
       
     } catch (error) {
       ErrorHandler.logError(error, { 
         action: 'initializeSheet',
-        sheetName: this.sheetName 
+        sheetName: this.sheetName,
+        createIfMissing: createIfMissing
       }, ErrorSeverity.HIGH, ErrorTypes.SPREADSHEET_API);
       throw error;
     }
@@ -95,6 +105,90 @@ class SentimentManager {
     sheet.setColumnWidth(6, 150); // Created Date
     sheet.setColumnWidth(7, 150); // Modified Date
     sheet.setColumnWidth(8, 200); // Modified By
+  }
+  
+  /**
+   * Save sentiment score to client-side storage (default method)
+   * @private
+   * @param {number} score - Sentiment score
+   * @param {string} comment - Comment
+   * @param {number} year - Year
+   * @param {number} month - Month
+   * @returns {Object} Operation result
+   */
+  saveToClientStorage(score, comment, year, month) {
+    try {
+      const currentDate = new Date();
+      const targetYear = year || currentDate.getFullYear();
+      const targetMonth = month || (currentDate.getMonth() + 1);
+      
+      const storageKey = `sentiment_${this.currentUser}_${targetYear}_${targetMonth}`;
+      const sentimentData = {
+        userEmail: this.currentUser,
+        year: targetYear,
+        month: targetMonth,
+        sentimentScore: score,
+        comment: comment,
+        createdDate: new Date().toISOString(),
+        modifiedDate: new Date().toISOString(),
+        modifiedBy: this.currentUser
+      };
+      
+      // Store in PropertiesService for persistence
+      PropertiesService.getUserProperties().setProperty(storageKey, JSON.stringify(sentimentData));
+      
+      // Cache the data
+      this.setCachedData(storageKey, sentimentData);
+      
+      return {
+        success: true,
+        data: sentimentData,
+        message: 'Sentiment score saved successfully (client storage)'
+      };
+      
+    } catch (error) {
+      ErrorHandler.logError(error, {
+        action: 'saveToClientStorage',
+        user: this.currentUser,
+        score: score
+      }, ErrorSeverity.MEDIUM, ErrorTypes.STORAGE);
+      
+      return {
+        success: false,
+        error: true,
+        message: 'Failed to save sentiment score: ' + error.message
+      };
+    }
+  }
+  
+  /**
+   * Get sentiment score from client-side storage
+   * @private
+   * @param {string} userEmail - User email
+   * @param {number} year - Year
+   * @param {number} month - Month
+   * @returns {Object} Sentiment data or null
+   */
+  getFromClientStorage(userEmail, year, month) {
+    try {
+      const storageKey = `sentiment_${userEmail}_${year}_${month}`;
+      const cached = this.getCachedData(storageKey);
+      if (cached) {
+        return cached;
+      }
+      
+      const stored = PropertiesService.getUserProperties().getProperty(storageKey);
+      if (stored) {
+        const data = JSON.parse(stored);
+        this.setCachedData(storageKey, data);
+        return data;
+      }
+      
+      return null;
+    } catch (error) {
+      console.warn('Failed to get sentiment from client storage:', error);
+      return null;
+    }
   }
   
   /**

@@ -634,6 +634,58 @@ if (typeof window !== 'undefined') {
     }
 
     /**
+     * Call server function with security context
+     */
+    function callServerFunctionSecure(functionName, ...args) {
+      // Get security context
+      const securityContext = {
+        timestamp: Date.now(),
+        sessionId: getSessionId(),
+        csrfToken: getCSRFToken(),
+        userAgent: navigator.userAgent
+      };
+      
+      // Add security context as first parameter
+      return callServerFunction(functionName, securityContext, ...args);
+    }
+
+    /**
+     * Get current session ID
+     */
+    function getSessionId() {
+      let sessionId = sessionStorage.getItem('casesdash_session_id');
+      if (!sessionId) {
+        sessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        sessionStorage.setItem('casesdash_session_id', sessionId);
+      }
+      return sessionId;
+    }
+
+    /**
+     * Get CSRF token
+     */
+    function getCSRFToken() {
+      let token = localStorage.getItem('casesdash_csrf_token');
+      if (!token) {
+        token = 'csrf_' + Date.now() + '_' + Math.random().toString(36).substr(2, 16);
+        localStorage.setItem('casesdash_csrf_token', token);
+      }
+      return token;
+    }
+
+    /**
+     * Get current user info
+     */
+    function getCurrentUser() {
+      try {
+        // Try to get from session or return default
+        return sessionStorage.getItem('casesdash_current_user') || 'unknown@google.com';
+      } catch (error) {
+        return 'unknown@google.com';
+      }
+    }
+
+    /**
      * Create new case functionality according to specification
      */
     async function createNewCase() {
@@ -1032,31 +1084,37 @@ if (typeof window !== 'undefined') {
     }
 
     /**
-     * Submit dynamic case form (spec 4.3.2)
+     * Submit dynamic case form with security and proper mapping (spec 4.3.2)
      */
     async function submitDynamicCaseForm() {
       try {
         const form = document.getElementById('dynamic-case-form');
         const sheetType = form.dataset.sheetType;
         
+        console.log('📝 Starting dynamic case form submission for:', sheetType);
+        
         // Collect form data
         const formData = new FormData(form);
         const caseData = {
           sheetType: sheetType,
-          channel: getChannelType(sheetType)
+          channel: getChannelType(sheetType),
+          createdBy: getCurrentUser(),
+          createdDate: new Date().toISOString()
         };
         
-        // Convert FormData to object
+        // Convert FormData to object with proper typing
         for (const [key, value] of formData.entries()) {
           const fieldElement = document.getElementById(`field-${key}`);
           if (fieldElement && fieldElement.type === 'checkbox') {
             caseData[key] = fieldElement.checked;
+          } else if (fieldElement && fieldElement.type === 'number') {
+            caseData[key] = parseFloat(value) || 0;
           } else {
             caseData[key] = value;
           }
         }
         
-        console.log('📝 Submitting dynamic case form:', { sheetType, caseData });
+        console.log('📋 Collected case data:', { sheetType, caseDataKeys: Object.keys(caseData) });
         
         // Validate required fields
         const validation = validateDynamicForm(form, sheetType);
@@ -1065,26 +1123,53 @@ if (typeof window !== 'undefined') {
           return;
         }
         
+        // Add security context for backend integration
+        const securityContext = {
+          timestamp: Date.now(),
+          sessionId: getSessionId(),
+          csrfToken: getCSRFToken(),
+          userAgent: navigator.userAgent,
+          referrer: document.referrer
+        };
+        
+        console.log('🔒 Adding security context for backend integration');
+        
         showLoading(true);
         
-        // Call server function to create case
-        const response = await callServerFunction('createCase', caseData);
+        // Call server function with security context
+        console.log('📡 Calling createCase with enhanced integration...');
+        const response = await callServerFunctionSecure('createCase', caseData, securityContext);
         
         if (response && response.success) {
-          showToast('✅ Case created successfully', 'success');
+          console.log('✅ Case created successfully:', response);
+          showToast(`✅ Case ${response.data?.caseId || 'created'} successfully saved to ${sheetType}`, 'success');
           closeDynamicCaseDialog();
           
           // Refresh case list if available
           if (typeof loadUserCases === 'function') {
             loadUserCases();
           }
+          
+          // Show case details if available
+          if (response.data?.caseId) {
+            setTimeout(() => {
+              showToast(`Case ID: ${response.data.caseId} - Check ${sheetType} sheet`, 'info');
+            }, 1000);
+          }
         } else {
-          throw new Error(response?.error || 'Failed to create case');
+          console.error('❌ Server response indicates failure:', response);
+          throw new Error(response?.error || response?.message || 'Failed to create case');
         }
         
       } catch (error) {
         console.error('❌ Dynamic case submission error:', error);
-        showError('Failed to create case: ' + error.message);
+        if (error.message.includes('Authentication')) {
+          showError('Authentication required. Please refresh and try again.');
+        } else if (error.message.includes('Validation')) {
+          showError('Please check your input and try again.');
+        } else {
+          showError('Failed to create case: ' + error.message);
+        }
       } finally {
         showLoading(false);
       }
@@ -1750,6 +1835,143 @@ if (typeof window !== 'undefined') {
         modal.style.display = 'none';
         modal.remove();
       }
+    }
+
+    /**
+     * Display sheet type selection dialog (spec 4.3.1)
+     */
+    function displaySheetTypeSelection(sheetTypes) {
+      console.log('🎯 Displaying sheet type selection for:', sheetTypes);
+      
+      // Get current theme
+      const isDark = getCurrentTheme() === 'dark';
+      const themeStyles = getThemeStyles(isDark);
+      
+      const modalHTML = `
+        <div id="sheet-type-selection-dialog" style="
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0,0,0,0.7);
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          z-index: 10000;
+        ">
+          <div style="
+            background: ${themeStyles.background};
+            color: ${themeStyles.text};
+            border-radius: 12px;
+            padding: 32px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+            border: 1px solid ${themeStyles.border};
+          ">
+            <h3 style="margin: 0 0 24px 0; color: ${themeStyles.title}; font-size: 24px;">
+              📋 Select Case Type
+            </h3>
+            
+            <p style="margin-bottom: 24px; color: ${themeStyles.subtitle}; font-size: 16px;">
+              Choose the sheet type for your new case. This will determine which fields are available and how the case is processed.
+            </p>
+            
+            <div class="sheet-type-options">
+              ${sheetTypes.map(sheetType => `
+                <div onclick="selectSheetType('${escapeHtml(sheetType)}', this)" style="
+                  padding: 16px;
+                  margin-bottom: 12px;
+                  border: 2px solid ${themeStyles.optionBorder};
+                  border-radius: 8px;
+                  cursor: pointer;
+                  background: ${themeStyles.optionBackground};
+                  transition: all 0.2s ease;
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                "
+                onmouseover="this.style.backgroundColor='${themeStyles.optionHover}'"
+                onmouseout="this.style.backgroundColor='${themeStyles.optionBackground}'">
+                  <div style="display: flex; align-items: center;">
+                    <input type="radio" name="sheetType" value="${escapeHtml(sheetType)}" style="margin-right: 12px; transform: scale(1.2);">
+                    <span style="font-weight: 500; font-size: 16px;">${escapeHtml(sheetType)}</span>
+                  </div>
+                  <div style="font-size: 12px; color: ${themeStyles.subtitle};">
+                    ${getSheetTypeDescription(sheetType)}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; margin-top: 32px; padding-top: 24px; border-top: 1px solid ${themeStyles.border};">
+              <button onclick="closeSheetTypeDialog()" style="
+                background: ${themeStyles.secondaryButton};
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 16px;
+                font-weight: 500;
+                transition: all 0.2s ease;
+                min-width: 120px;
+              "
+              onmouseover="this.style.backgroundColor='${themeStyles.secondaryButtonHover}'"
+              onmouseout="this.style.backgroundColor='${themeStyles.secondaryButton}'">
+                Cancel
+              </button>
+              
+              <button onclick="proceedWithSelectedSheetType()" style="
+                background: ${themeStyles.primaryButton};
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 16px;
+                font-weight: 500;
+                transition: all 0.2s ease;
+                min-width: 120px;
+                box-shadow: 0 2px 8px rgba(25, 118, 210, 0.3);
+              "
+              onmouseover="this.style.backgroundColor='${themeStyles.primaryButtonHover}'; this.style.transform='translateY(-2px)'"
+              onmouseout="this.style.backgroundColor='${themeStyles.primaryButton}'; this.style.transform='translateY(0)'">
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      
+      // Remove existing modal if any
+      const existingModal = document.getElementById('sheet-type-selection-dialog');
+      if (existingModal) {
+        existingModal.remove();
+      }
+      
+      // Add modal to body
+      document.body.insertAdjacentHTML('beforeend', modalHTML);
+      
+      console.log('✅ Sheet type selection dialog displayed');
+    }
+
+    /**
+     * Get sheet type description for UI
+     */
+    function getSheetTypeDescription(sheetType) {
+      const descriptions = {
+        'OT Email': 'Email channel, OT cases',
+        '3PO Email': 'Email channel, 3PO cases with categories',
+        'OT Chat': 'Chat channel, OT cases',
+        '3PO Chat': 'Chat channel, 3PO cases with categories',
+        'OT Phone': 'Phone channel, OT cases',
+        '3PO Phone': 'Phone channel, 3PO cases with categories'
+      };
+      return descriptions[sheetType] || 'Standard case type';
     }
 
     /**
