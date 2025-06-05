@@ -256,6 +256,14 @@ if (typeof window !== 'undefined') {
                       title="編集">
                 <i class="material-icons">edit</i>
               </button>
+              ${(caseItem.status && ['Solution Offered', 'Finished', 'Closed'].includes(caseItem.status)) ? `
+                <button class="mdl-button mdl-js-button mdl-button--icon reactivate-button" 
+                        onclick="reactivateCase('${escapeHtml(caseItem.id)}', '${escapeHtml(caseItem.sheetType)}')"
+                        title="Re-activate case"
+                        style="color: var(--md-success-50);">
+                  <i class="material-icons">refresh</i>
+                </button>
+              ` : ''}
               <button class="mdl-button mdl-js-button mdl-button--icon" 
                       onclick="deleteCase('${escapeHtml(caseItem.id)}', '${escapeHtml(caseItem.sheetType)}')"
                       title="削除">
@@ -682,6 +690,48 @@ if (typeof window !== 'undefined') {
         return sessionStorage.getItem('casesdash_current_user') || 'unknown@google.com';
       } catch (error) {
         return 'unknown@google.com';
+      }
+    }
+
+    /**
+     * Reactivate a closed case (Spec 4.2.3)
+     */
+    async function reactivateCase(caseId, sheetType) {
+      try {
+        // Show confirmation dialog
+        const confirmed = confirm(`Are you sure you want to reactivate case ${caseId}?\n\nThis will change the status back to "Assigned" and make the case active again.`);
+        if (!confirmed) return;
+        
+        showLoading(true);
+        
+        // Call server function to reactivate the case
+        const response = await callServerFunction('reactivateCase', {
+          caseId: caseId,
+          sheetType: sheetType,
+          newStatus: 'Assigned',
+          reactivatedBy: getCurrentUser(),
+          reactivatedAt: new Date().toISOString(),
+          reason: 'Manual reactivation from My Cases view'
+        });
+        
+        if (response.success) {
+          showToast(`✅ Case ${caseId} has been successfully reactivated`, 'success');
+          
+          // Reload the cases list to reflect the status change
+          await loadUserCases();
+          
+          // Log the reactivation action
+          console.log(`🔄 Case reactivated: ${caseId} (${sheetType}) by ${getCurrentUser()}`);
+          
+        } else {
+          throw new Error(response.error || 'Failed to reactivate case');
+        }
+        
+      } catch (error) {
+        console.error('❌ Case reactivation failed:', error);
+        showError(`Failed to reactivate case ${caseId}: ${error.message}`);
+      } finally {
+        showLoading(false);
       }
     }
 
@@ -2613,6 +2663,7 @@ if (typeof window !== 'undefined') {
       loadUserCases,
       viewCaseDetails,
       deleteCase,
+      reactivateCase,
       handleCaseSelection,
       updateSelectedCases,
       createNewCase,

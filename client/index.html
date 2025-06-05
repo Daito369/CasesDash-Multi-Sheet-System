@@ -3046,6 +3046,41 @@
                         </button>
                     </div>
                     <div class="modal-body">
+                        <!-- Spreadsheet Configuration Section (Migrated from setup.html) -->
+                        <div class="settings-section">
+                            <h5>
+                                <span class="material-symbols-outlined" style="vertical-align: middle; margin-right: 8px;">table_chart</span>
+                                Spreadsheet Configuration
+                            </h5>
+                            <div class="setting-field" style="flex-direction: column; align-items: flex-start;">
+                                <label for="spreadsheet-id-setting" style="margin-bottom: 8px;">Google Spreadsheet ID:</label>
+                                <input 
+                                    type="text" 
+                                    id="spreadsheet-id-setting" 
+                                    placeholder="Enter your spreadsheet ID or URL..."
+                                    style="width: 100%; padding: 12px; border: 2px solid var(--current-surface-container-highest); border-radius: 4px; background: var(--current-surface-container); color: var(--current-on-surface); font-size: 14px; margin-bottom: 8px;"
+                                >
+                                <div style="font-size: 12px; color: var(--current-on-surface-variant); margin-bottom: 12px;">
+                                    Find this in your spreadsheet URL: https://docs.google.com/spreadsheets/d/<strong>SPREADSHEET_ID</strong>/edit
+                                </div>
+                                <div style="display: flex; gap: 12px; width: 100%;">
+                                    <button type="button" class="btn btn-secondary" onclick="testSpreadsheetConnection()" id="test-connection-btn">
+                                        <span class="material-symbols-outlined">wifi_protected_setup</span>
+                                        Test Connection
+                                    </button>
+                                    <button type="button" class="btn btn-secondary" onclick="validateSpreadsheetSheets()" id="validate-sheets-btn">
+                                        <span class="material-symbols-outlined">fact_check</span>
+                                        Validate Sheets
+                                    </button>
+                                </div>
+                                <div id="spreadsheet-status" style="margin-top: 12px; display: none;"></div>
+                                <div id="sheet-validation-results" style="margin-top: 12px; display: none;">
+                                    <h6 style="margin: 0 0 8px 0; color: var(--current-on-surface);">Sheet Validation Results:</h6>
+                                    <div id="sheet-validation-list" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px;"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <div class="settings-section">
                             <h5>Display Settings</h5>
                             <div class="setting-field">
@@ -3081,6 +3116,42 @@
                                     <span class="checkmark"></span>
                                     Enable sound alerts
                                 </label>
+                            </div>
+                        </div>
+
+                        <!-- Team Leadership Configuration (spec 4.6.4) -->
+                        <div class="settings-section" id="team-leadership-section" style="display: none;">
+                            <h5>
+                                <span class="material-symbols-outlined" style="vertical-align: middle; margin-right: 8px;">groups</span>
+                                Team Leadership Configuration
+                            </h5>
+                            <div class="setting-field" style="flex-direction: column; align-items: flex-start;">
+                                <label style="margin-bottom: 8px;">Google Chat Notification Room URL:</label>
+                                <input 
+                                    type="url" 
+                                    id="chat-webhook-url" 
+                                    placeholder="https://chat.googleapis.com/v1/spaces/..."
+                                    style="width: 100%; padding: 12px; border: 2px solid var(--current-surface-container-highest); border-radius: 4px; background: var(--current-surface-container); color: var(--current-on-surface); font-size: 14px; margin-bottom: 8px;"
+                                >
+                                <div style="font-size: 12px; color: var(--current-on-surface-variant); margin-bottom: 12px;">
+                                    URL for P95 alerts to team leaders (PL/TL/JTL/QM/WFM). Use Google Chat Apps for webhooks.
+                                </div>
+                                
+                                <label style="margin-bottom: 8px;">Default Team Leaders (one per line):</label>
+                                <textarea 
+                                    id="default-team-leaders" 
+                                    placeholder="team-leader@google.com&#10;qa-manager@google.com&#10;admin@google.com"
+                                    rows="4"
+                                    style="width: 100%; padding: 12px; border: 2px solid var(--current-surface-container-highest); border-radius: 4px; background: var(--current-surface-container); color: var(--current-on-surface); font-size: 14px; resize: vertical; margin-bottom: 8px;"
+                                ></textarea>
+                                <div style="font-size: 12px; color: var(--current-on-surface-variant); margin-bottom: 12px;">
+                                    Fallback notification recipients when specific team leaders are not configured.
+                                </div>
+                                
+                                <button type="button" class="btn btn-secondary" onclick="saveTeamLeadershipConfig()" id="save-team-config-btn">
+                                    <span class="material-symbols-outlined">save</span>
+                                    Save Team Configuration
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -3212,6 +3283,24 @@
          */
         function loadCurrentSettings(modal) {
             try {
+                // Load spreadsheet configuration
+                const spreadsheetInput = modal.querySelector('#spreadsheet-id-setting');
+                if (spreadsheetInput) {
+                    // Try to get current spreadsheet ID from server
+                    if (typeof google !== 'undefined' && google.script && google.script.run) {
+                        google.script.run
+                            .withSuccessHandler(function(spreadsheetId) {
+                                if (spreadsheetId) {
+                                    spreadsheetInput.value = spreadsheetId;
+                                }
+                            })
+                            .withFailureHandler(function(error) {
+                                console.warn('Could not load current spreadsheet ID:', error);
+                            })
+                            .getCurrentSpreadsheetId();
+                    }
+                }
+                
                 // Load theme setting
                 const themeSelect = modal.querySelector('#theme-setting');
                 if (themeSelect) {
@@ -3244,8 +3333,77 @@
                     soundCheckbox.checked = localStorage.getItem('casesdash_sound') !== 'false';
                 }
                 
+                // Load team leadership configuration (spec 4.6.4)
+                loadTeamLeadershipSettings(modal);
+                
             } catch (error) {
                 console.error('Failed to load current settings:', error);
+            }
+        }
+        
+        /**
+         * Load team leadership settings
+         */
+        function loadTeamLeadershipSettings(modal) {
+            try {
+                // Check if user has admin/team leader privileges
+                if (typeof google !== 'undefined' && google.script && google.script.run) {
+                    google.script.run
+                        .withSuccessHandler(function(userInfo) {
+                            if (userInfo && ['admin', 'teamLeader'].includes(userInfo.role)) {
+                                // Show team leadership section
+                                const teamSection = modal.querySelector('#team-leadership-section');
+                                if (teamSection) {
+                                    teamSection.style.display = 'block';
+                                }
+                                
+                                // Load existing team configuration
+                                loadExistingTeamConfiguration(modal);
+                            }
+                        })
+                        .withFailureHandler(function(error) {
+                            console.warn('Could not check user role for team settings:', error);
+                        })
+                        .getCurrentUserInfo();
+                }
+                
+            } catch (error) {
+                console.warn('Failed to load team leadership settings:', error);
+            }
+        }
+        
+        /**
+         * Load existing team configuration
+         */
+        function loadExistingTeamConfiguration(modal) {
+            try {
+                if (typeof google !== 'undefined' && google.script && google.script.run) {
+                    google.script.run
+                        .withSuccessHandler(function(config) {
+                            if (config && config.success && config.data) {
+                                const data = config.data;
+                                
+                                // Load Chat webhook URL
+                                const chatUrlInput = modal.querySelector('#chat-webhook-url');
+                                if (chatUrlInput && data.chatWebhookUrl) {
+                                    chatUrlInput.value = data.chatWebhookUrl;
+                                }
+                                
+                                // Load default team leaders
+                                const teamLeadersTextarea = modal.querySelector('#default-team-leaders');
+                                if (teamLeadersTextarea && data.defaultTeamLeaders) {
+                                    teamLeadersTextarea.value = data.defaultTeamLeaders.join('\n');
+                                }
+                            }
+                        })
+                        .withFailureHandler(function(error) {
+                            console.warn('Could not load existing team configuration:', error);
+                        })
+                        .getTeamLeadershipConfiguration();
+                }
+                
+            } catch (error) {
+                console.warn('Failed to load existing team configuration:', error);
             }
         }
         
@@ -3256,6 +3414,29 @@
             try {
                 const modal = document.getElementById('settings-modal');
                 if (!modal) return;
+                
+                // Save spreadsheet configuration
+                const spreadsheetInput = modal.querySelector('#spreadsheet-id-setting');
+                if (spreadsheetInput && spreadsheetInput.value.trim()) {
+                    const spreadsheetId = extractSpreadsheetId(spreadsheetInput.value.trim());
+                    if (spreadsheetId) {
+                        // Save to server
+                        if (typeof google !== 'undefined' && google.script && google.script.run) {
+                            google.script.run
+                                .withSuccessHandler(function(result) {
+                                    if (result && result.success) {
+                                        console.log('Spreadsheet ID saved successfully');
+                                    } else {
+                                        console.warn('Failed to save spreadsheet ID:', result.message);
+                                    }
+                                })
+                                .withFailureHandler(function(error) {
+                                    console.error('Error saving spreadsheet ID:', error);
+                                })
+                                .saveSpreadsheetId(spreadsheetId);
+                        }
+                    }
+                }
                 
                 // Save theme setting
                 const themeSelect = modal.querySelector('#theme-setting');
@@ -3290,6 +3471,217 @@
                 showErrorToast('Failed to save settings');
             }
         };
+        
+        /**
+         * Test spreadsheet connection
+         */
+        window.testSpreadsheetConnection = function() {
+            try {
+                const spreadsheetInput = document.getElementById('spreadsheet-id-setting');
+                const statusDiv = document.getElementById('spreadsheet-status');
+                const testBtn = document.getElementById('test-connection-btn');
+                
+                if (!spreadsheetInput || !statusDiv || !testBtn) return;
+                
+                const spreadsheetId = extractSpreadsheetId(spreadsheetInput.value.trim());
+                if (!spreadsheetId) {
+                    showSpreadsheetStatus('Please enter a valid spreadsheet ID or URL', 'error');
+                    return;
+                }
+                
+                // Update input with extracted ID
+                spreadsheetInput.value = spreadsheetId;
+                
+                // Show loading state
+                testBtn.disabled = true;
+                testBtn.innerHTML = '<span class="material-symbols-outlined">sync</span> Testing...';
+                showSpreadsheetStatus('Testing connection to spreadsheet...', 'info');
+                
+                // Call server function to test connection
+                if (typeof google !== 'undefined' && google.script && google.script.run) {
+                    google.script.run
+                        .withSuccessHandler(function(result) {
+                            testBtn.disabled = false;
+                            testBtn.innerHTML = '<span class="material-symbols-outlined">wifi_protected_setup</span> Test Connection';
+                            
+                            if (result && result.success) {
+                                showSpreadsheetStatus('✅ Connection successful! Spreadsheet is accessible.', 'success');
+                                
+                                // Save the spreadsheet ID
+                                if (typeof google.script.run.saveSpreadsheetId === 'function') {
+                                    google.script.run.saveSpreadsheetId(spreadsheetId);
+                                }
+                            } else {
+                                showSpreadsheetStatus(`❌ Connection failed: ${result.message || 'Unknown error'}`, 'error');
+                            }
+                        })
+                        .withFailureHandler(function(error) {
+                            testBtn.disabled = false;
+                            testBtn.innerHTML = '<span class="material-symbols-outlined">wifi_protected_setup</span> Test Connection';
+                            showSpreadsheetStatus(`❌ Connection failed: ${error.message || error}`, 'error');
+                        })
+                        .testSpreadsheetConnection(spreadsheetId);
+                } else {
+                    // Fallback for development
+                    setTimeout(() => {
+                        testBtn.disabled = false;
+                        testBtn.innerHTML = '<span class="material-symbols-outlined">wifi_protected_setup</span> Test Connection';
+                        showSpreadsheetStatus('⚠️ Development mode: Connection test simulated', 'warning');
+                    }, 1500);
+                }
+                
+            } catch (error) {
+                console.error('Error testing spreadsheet connection:', error);
+                showSpreadsheetStatus(`❌ Error: ${error.message}`, 'error');
+            }
+        };
+        
+        /**
+         * Validate spreadsheet sheets
+         */
+        window.validateSpreadsheetSheets = function() {
+            try {
+                const spreadsheetInput = document.getElementById('spreadsheet-id-setting');
+                const validationDiv = document.getElementById('sheet-validation-results');
+                const validationList = document.getElementById('sheet-validation-list');
+                const validateBtn = document.getElementById('validate-sheets-btn');
+                
+                if (!spreadsheetInput || !validationDiv || !validationList || !validateBtn) return;
+                
+                const spreadsheetId = extractSpreadsheetId(spreadsheetInput.value.trim());
+                if (!spreadsheetId) {
+                    showSpreadsheetStatus('Please enter a valid spreadsheet ID or URL first', 'error');
+                    return;
+                }
+                
+                // Show loading state
+                validateBtn.disabled = true;
+                validateBtn.innerHTML = '<span class="material-symbols-outlined">sync</span> Validating...';
+                
+                const requiredSheets = ['OT Email', '3PO Email', 'OT Chat', '3PO Chat', 'OT Phone', '3PO Phone'];
+                
+                // Call server function to validate sheets
+                if (typeof google !== 'undefined' && google.script && google.script.run) {
+                    google.script.run
+                        .withSuccessHandler(function(result) {
+                            validateBtn.disabled = false;
+                            validateBtn.innerHTML = '<span class="material-symbols-outlined">fact_check</span> Validate Sheets';
+                            
+                            if (result && result.success) {
+                                displaySheetValidationResults(result.existingSheets || [], result.missingSheets || [], requiredSheets);
+                            } else {
+                                showSpreadsheetStatus(`❌ Validation failed: ${result.message || 'Unknown error'}`, 'error');
+                            }
+                        })
+                        .withFailureHandler(function(error) {
+                            validateBtn.disabled = false;
+                            validateBtn.innerHTML = '<span class="material-symbols-outlined">fact_check</span> Validate Sheets';
+                            showSpreadsheetStatus(`❌ Validation failed: ${error.message || error}`, 'error');
+                        })
+                        .validateSpreadsheetSheets(spreadsheetId);
+                } else {
+                    // Fallback for development
+                    setTimeout(() => {
+                        validateBtn.disabled = false;
+                        validateBtn.innerHTML = '<span class="material-symbols-outlined">fact_check</span> Validate Sheets';
+                        
+                        // Simulate validation results
+                        const simulatedExisting = ['OT Email', '3PO Email', 'OT Chat'];
+                        const simulatedMissing = ['3PO Chat', 'OT Phone', '3PO Phone'];
+                        displaySheetValidationResults(simulatedExisting, simulatedMissing, requiredSheets);
+                    }, 1500);
+                }
+                
+            } catch (error) {
+                console.error('Error validating spreadsheet sheets:', error);
+                showSpreadsheetStatus(`❌ Error: ${error.message}`, 'error');
+            }
+        };
+        
+        /**
+         * Extract spreadsheet ID from URL or return as-is if already an ID
+         */
+        function extractSpreadsheetId(input) {
+            if (!input) return '';
+            
+            // Extract ID from Google Sheets URL
+            const urlMatch = input.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+            return urlMatch ? urlMatch[1] : input;
+        }
+        
+        /**
+         * Show spreadsheet status message
+         */
+        function showSpreadsheetStatus(message, type) {
+            const statusDiv = document.getElementById('spreadsheet-status');
+            if (!statusDiv) return;
+            
+            const typeColors = {
+                success: 'var(--md-success-50)',
+                error: 'var(--md-error-50)',
+                warning: 'var(--md-warning-50)',
+                info: 'var(--md-primary-50)'
+            };
+            
+            statusDiv.innerHTML = `
+                <div style="padding: 12px; border-radius: 4px; background: var(--current-surface-container-high); border-left: 4px solid ${typeColors[type] || typeColors.info}; color: var(--current-on-surface);">
+                    ${message}
+                </div>
+            `;
+            statusDiv.style.display = 'block';
+        }
+        
+        /**
+         * Display sheet validation results
+         */
+        function displaySheetValidationResults(existingSheets, missingSheets, requiredSheets) {
+            const validationDiv = document.getElementById('sheet-validation-results');
+            const validationList = document.getElementById('sheet-validation-list');
+            
+            if (!validationDiv || !validationList) return;
+            
+            validationList.innerHTML = '';
+            
+            // Show results for all required sheets
+            requiredSheets.forEach(sheetName => {
+                const exists = existingSheets.includes(sheetName);
+                const item = document.createElement('div');
+                
+                item.style.cssText = `
+                    padding: 8px 12px; 
+                    border-radius: 4px; 
+                    font-size: 14px; 
+                    display: flex; 
+                    align-items: center; 
+                    gap: 8px;
+                    ${exists 
+                        ? 'background: var(--md-success-90); color: var(--md-success-10);' 
+                        : 'background: var(--md-error-90); color: var(--md-error-10);'
+                    }
+                `;
+                
+                item.innerHTML = `
+                    <span class="material-symbols-outlined" style="font-size: 18px;">
+                        ${exists ? 'check_circle' : 'error'}
+                    </span>
+                    <span>${sheetName}</span>
+                `;
+                
+                validationList.appendChild(item);
+            });
+            
+            validationDiv.style.display = 'block';
+            
+            // Show summary status
+            const foundCount = existingSheets.filter(sheet => requiredSheets.includes(sheet)).length;
+            const totalRequired = requiredSheets.length;
+            
+            if (foundCount === totalRequired) {
+                showSpreadsheetStatus(`✅ All ${totalRequired} required sheets found! Spreadsheet is ready to use.`, 'success');
+            } else {
+                showSpreadsheetStatus(`⚠️ Found ${foundCount}/${totalRequired} required sheets. Missing sheets need to be created.`, 'warning');
+            }
+        }
         
         // Emergency Live Mode function
         window.openLiveMode = function() {
@@ -3349,6 +3741,127 @@
                 let newValue = Math.max(1, Math.min(10, currentValue + delta));
                 slider.value = newValue;
                 display.textContent = newValue.toFixed(1);
+            }
+        };
+        
+        /**
+         * Save team leadership configuration (Spec 4.6.4)
+         */
+        window.saveTeamLeadershipConfig = function() {
+            try {
+                const modal = document.getElementById('settings-modal');
+                if (!modal) return;
+                
+                const chatWebhookUrl = modal.querySelector('#chat-webhook-url')?.value?.trim();
+                const defaultLeadersText = modal.querySelector('#default-team-leaders')?.value?.trim();
+                const saveBtn = modal.querySelector('#save-team-config-btn');
+                
+                // Validate inputs
+                if (!chatWebhookUrl && !defaultLeadersText) {
+                    showErrorToast('Please provide at least a Chat URL or default team leaders');
+                    return;
+                }
+                
+                // Validate Chat URL format
+                if (chatWebhookUrl && !chatWebhookUrl.includes('chat.googleapis.com')) {
+                    showErrorToast('Invalid Google Chat URL format');
+                    return;
+                }
+                
+                // Parse default team leaders
+                const defaultLeaders = defaultLeadersText 
+                    ? defaultLeadersText.split('\n')
+                        .map(email => email.trim())
+                        .filter(email => email && email.includes('@'))
+                    : [];
+                
+                if (defaultLeadersText && defaultLeaders.length === 0) {
+                    showErrorToast('Please provide valid email addresses for team leaders');
+                    return;
+                }
+                
+                // Show loading state
+                if (saveBtn) {
+                    saveBtn.disabled = true;
+                    saveBtn.innerHTML = '<span class="material-symbols-outlined">sync</span> Saving...';
+                }
+                
+                // Prepare configuration object
+                const teamConfig = {
+                    chatWebhookUrl: chatWebhookUrl,
+                    defaultTeamLeaders: defaultLeaders,
+                    updatedAt: new Date().toISOString(),
+                    updatedBy: getCurrentUser() || 'unknown'
+                };
+                
+                // Save to server
+                if (typeof google !== 'undefined' && google.script && google.script.run) {
+                    google.script.run
+                        .withSuccessHandler(function(result) {
+                            if (saveBtn) {
+                                saveBtn.disabled = false;
+                                saveBtn.innerHTML = '<span class="material-symbols-outlined">save</span> Save Team Configuration';
+                            }
+                            
+                            if (result && result.success) {
+                                showSuccessToast('Team leadership configuration saved successfully');
+                            } else {
+                                showErrorToast('Failed to save team configuration: ' + (result.message || 'Unknown error'));
+                            }
+                        })
+                        .withFailureHandler(function(error) {
+                            if (saveBtn) {
+                                saveBtn.disabled = false;
+                                saveBtn.innerHTML = '<span class="material-symbols-outlined">save</span> Save Team Configuration';
+                            }
+                            showErrorToast('Error saving team configuration: ' + error.message);
+                        })
+                        .saveTeamLeadershipConfiguration(teamConfig);
+                } else {
+                    // Fallback for development
+                    setTimeout(() => {
+                        if (saveBtn) {
+                            saveBtn.disabled = false;
+                            saveBtn.innerHTML = '<span class="material-symbols-outlined">save</span> Save Team Configuration';
+                        }
+                        showSuccessToast('Team configuration saved (development mode)');
+                    }, 1000);
+                }
+                
+            } catch (error) {
+                console.error('Error saving team leadership configuration:', error);
+                showErrorToast('Error saving team configuration: ' + error.message);
+            }
+        };
+        
+        /**
+         * Get current user identifier
+         */
+        function getCurrentUser() {
+            try {
+                // Try various methods to get current user
+                if (window.CasesDashApp && window.CasesDashApp.getCurrentUser) {
+                    return window.CasesDashApp.getCurrentUser();
+                }
+                
+                // Fallback methods
+                return sessionStorage.getItem('casesdash_current_user') || 
+                       localStorage.getItem('casesdash_current_user') || 
+                       'unknown@google.com';
+            } catch (error) {
+                return 'unknown@google.com';
+            }
+        }
+        
+        /**
+         * Global reactivate case function (Spec 4.2.3)
+         */
+        window.reactivateCase = function(caseId, sheetType) {
+            if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.reactivateCase === 'function') {
+                window.CasesDashCaseManager.reactivateCase(caseId, sheetType);
+            } else {
+                console.error('❌ CaseManager not available for case reactivation');
+                alert('Case Manager not available. Please refresh the page and try again.');
             }
         };
         

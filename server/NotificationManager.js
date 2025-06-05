@@ -698,9 +698,129 @@ class NotificationManager {
         return [caseData.assignee];
       case 'case_escalated':
         return [caseData.assignee, caseData.manager || 'supervisor@company.com'];
+      case 'trt_critical':
+      case 'trt_warning':
+        // P95 alerts target team leaders (spec 6.1)
+        return this._getTeamLeadersForUser(caseData.assignee);
       default:
         return [caseData.assignee || 'admin@company.com'];
     }
+  }
+
+  /**
+   * Get team leaders for a specific user (spec 4.6.4)
+   * @private
+   * @param {string} userEmail - User email
+   * @returns {Array} Team leader email addresses
+   */
+  _getTeamLeadersForUser(userEmail) {
+    try {
+      // Get team leadership configuration from Properties Service
+      const teamLeadersConfig = PropertiesService.getScriptProperties().getProperty('TEAM_LEADERS_CONFIG');
+      
+      if (teamLeadersConfig) {
+        const config = JSON.parse(teamLeadersConfig);
+        
+        // Try to find the user's team leaders
+        for (const [team, leaders] of Object.entries(config)) {
+          if (this._isUserInTeam(userEmail, team, config)) {
+            // Return all leadership roles: PL, TL, JTL, QM, WFM
+            return this._getTeamLeadershipHierarchy(leaders);
+          }
+        }
+      }
+      
+      // Fallback: return default team leaders if no specific team found
+      return this._getDefaultTeamLeaders();
+      
+    } catch (error) {
+      console.error('Failed to get team leaders:', error);
+      return this._getDefaultTeamLeaders();
+    }
+  }
+
+  /**
+   * Check if user belongs to a specific team
+   * @private
+   * @param {string} userEmail - User email
+   * @param {string} teamName - Team name
+   * @param {Object} config - Team configuration
+   * @returns {boolean} Whether user is in team
+   */
+  _isUserInTeam(userEmail, teamName, config) {
+    try {
+      const teamMembers = config[teamName]?.members || [];
+      const userLdap = userEmail.split('@')[0].toLowerCase();
+      
+      return teamMembers.some(member => 
+        member.toLowerCase().includes(userLdap) || 
+        userLdap.includes(member.toLowerCase())
+      );
+    } catch (error) {
+      console.warn('Failed to check team membership:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Get team leadership hierarchy (PL, TL, JTL, QM, WFM)
+   * @private
+   * @param {Object} leaders - Leadership configuration for team
+   * @returns {Array} Leadership email addresses
+   */
+  _getTeamLeadershipHierarchy(leaders) {
+    const hierarchy = [];
+    
+    // Add leaders in order of notification priority (spec 4.6.4)
+    if (leaders.PL) hierarchy.push(leaders.PL);      // Project Leader
+    if (leaders.TL) hierarchy.push(leaders.TL);      // Team Leader
+    if (leaders.JTL) hierarchy.push(leaders.JTL);    // Junior Team Leader
+    if (leaders.QM) hierarchy.push(leaders.QM);      // Quality Manager
+    if (leaders.WFM) hierarchy.push(leaders.WFM);    // Workforce Manager
+    
+    // Ensure all email addresses are properly formatted
+    return hierarchy
+      .filter(email => email && typeof email === 'string')
+      .map(email => email.includes('@') ? email : `${email}@google.com`)
+      .filter(email => this._isValidEmail(email));
+  }
+
+  /**
+   * Get default team leaders when no specific team is found
+   * @private
+   * @returns {Array} Default team leader emails
+   */
+  _getDefaultTeamLeaders() {
+    try {
+      // Get default team leaders from Properties Service
+      const defaultLeaders = PropertiesService.getScriptProperties().getProperty('DEFAULT_TEAM_LEADERS');
+      
+      if (defaultLeaders) {
+        return JSON.parse(defaultLeaders).filter(email => this._isValidEmail(email));
+      }
+      
+      // Hardcoded fallback for critical notifications
+      return [
+        'team-leader@google.com',
+        'qa-manager@google.com',
+        'admin@google.com'
+      ];
+      
+    } catch (error) {
+      console.error('Failed to get default team leaders:', error);
+      return ['admin@google.com'];
+    }
+  }
+
+  /**
+   * Validate email address format
+   * @private
+   * @param {string} email - Email to validate
+   * @returns {boolean} Whether email is valid
+   */
+  _isValidEmail(email) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
   }
 
   /**
