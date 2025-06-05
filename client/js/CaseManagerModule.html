@@ -2702,6 +2702,9 @@ if (typeof window !== 'undefined') {
       resetSpecificationCaseForm,
       cancelCaseForm,
       
+      // Case re-activation functionality (Spec 4.2.3)
+      reactivateCase,
+      
       getState: () => ({ ...caseState })
     };
 
@@ -2961,6 +2964,56 @@ if (typeof window !== 'undefined') {
     const radio = element.querySelector('input[type="radio"]');
     if (radio) {
       radio.checked = true;
+    }
+  };
+
+  // Case Re-activation functionality (Spec 4.2.3)
+  window.reactivateCase = function(caseId) {
+    if (window.CasesDashCaseManager && typeof window.CasesDashCaseManager.reactivateCase === 'function') {
+      return window.CasesDashCaseManager.reactivateCase(caseId);
+    }
+    
+    // Fallback implementation
+    console.log('🔄 Reactivating case:', caseId);
+    
+    // Show confirmation dialog
+    if (!confirm(`Are you sure you want to reactivate case ${caseId}?`)) {
+      return;
+    }
+    
+    // Call server function to reactivate case
+    if (typeof google !== 'undefined' && google.script && google.script.run) {
+      google.script.run
+        .withSuccessHandler(function(response) {
+          if (response && response.success) {
+            console.log('✅ Case reactivated successfully:', caseId);
+            // Refresh the case list if available
+            if (typeof refreshCaseList === 'function') {
+              refreshCaseList();
+            }
+            // Show success message
+            if (typeof showToast === 'function') {
+              showToast('Case reactivated successfully', 'success');
+            }
+          } else {
+            console.error('❌ Failed to reactivate case:', response?.error || 'Unknown error');
+            if (typeof showToast === 'function') {
+              showToast('Failed to reactivate case: ' + (response?.error || 'Unknown error'), 'error');
+            }
+          }
+        })
+        .withFailureHandler(function(error) {
+          console.error('❌ Server error reactivating case:', error);
+          if (typeof showToast === 'function') {
+            showToast('Server error: Failed to reactivate case', 'error');
+          }
+        })
+        .reactivateCase(caseId);
+    } else {
+      console.warn('⚠️ Google Apps Script environment not available - cannot reactivate case');
+      if (typeof showToast === 'function') {
+        showToast('Cannot reactivate case: GAS environment not available', 'warning');
+      }
     }
   };
 }
