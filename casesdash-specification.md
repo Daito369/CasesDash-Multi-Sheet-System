@@ -693,11 +693,11 @@ const SheetColumnMappings = {
 | シート | カラー | ボーダー |
 |--------|--------|----------|
 | OT Email | #4285F4 (Google Blue) | 実線 |
-| 3PO Email | #34A853 (Google Green) | 破線 |
+| 3PO Email | #34A853 (Google Green) | 実線 |
 | OT Chat | #FBBC05 (Google Yellow) | 実線 |
-| 3PO Chat | #EA4335 (Google Red) | 破線 |
+| 3PO Chat | #EA4335 (Google Red) | 実線 |
 | OT Phone | #8430CE (Google Purple) | 実線 |
-| 3PO Phone | #F57C00 (Google Orange) | 破線 |
+| 3PO Phone | #F57C00 (Google Orange) | 実線 |
 
 ### リアルタイムタイマー仕様
 
@@ -761,10 +761,13 @@ const SheetColumnMappings = {
 | Triage | チェックボックス | 0/1 | 0 | - |
 | Prefer Either | チェックボックス | 0/1 | 0 | - |
 | Is 3.0 | チェックボックス | 0/1 | 0 | - |
-| 1st Assignee | 入力フォーム | LDAP ID | 現在のユーザー | ✓ |
+| 1st Assignee | 入力フォーム | Ldap@Google.com | Ldap | ✓ |
 | MCC | チェックボックス | 0/1 | 0 | - |
 | Change to Child | チェックボックス | 0/1 | 0 | - |
+| Final Assignee | 入力フォーム | Ldap@Google.com | Ldap| ✓ |
+| Final Segment | セレクトボックス | Platinum, Titanium, Gold, Silver, Bronze - Low, Bronze - High | Incoming Segmentで選択したものを反映 | ✓ |
 | Case Status | セレクトボックス | Assigned, Solution Offered, Finished | Assigned | ✓ |
+| non NCC | セレクトボックス | Duplicate, Discard, Transfer to Platinum, Transfer to S/B, Transfer to TDCX, Transfer to 3PO, Transfer to OT, Transfer to EN Team, Transfer to GMB Team, Transfer to Other Team (not AM) | - | - |
 | Bug | チェックボックス | 0/1 | 0 | - |
 | Need Info | チェックボックス | 0/1 | 0 | - |
 
@@ -778,8 +781,8 @@ const SheetColumnMappings = {
 
 | フィールド名 | フィールドタイプ | 選択肢/形式 | デフォルト値 | 必須 |
 |-------------|-----------------|------------|-------------|------|
-| Issue Category | セレクトボックス | CBT invo-invo, CBT invo-auto, CBT (self to self), LC creation, PP link, PP update, IDT/ Bmod, LCS billing policy, self serve issue, Unidentified Charge, CBT Flow, GQ, OOS, Bulk CBT, CBT ext request, MMS billing policy, Promotion code, Refund, Review, TM form, Trademarks issue, Under Review, Certificate, Suspend, AIV, Complaint | - | ✓ |
-| Details | テキストエリア | 自由記述 | - | - |
+| Issue Category | セレクトボックス | CBT invo-invo, CBT invo-auto, CBT (self to self), LC creation, PP link, PP update, IDT/ Bmod, LCS billing policy, self serve issue, Unidentified Charge, CBT Flow, GQ, OOS, Bulk CBT, CBT ext request, MMS billing policy, Promotion code, Refund, Review, TM form, Trademarks issue, Under Review, Certificate, Suspend, AIV, Complaint | - | - |
+| Details | セレクトボックス（入力して部分一致検索あり） | 不適切な価格設定 / 許可されないビジネス手法, 誤解を招く広告のデザイン, 信頼できない文言, 操作されたメディア, 誤解を招く表現, ビジネス名の要件, 許可されないビジネス, 関連性が不明確, 法的要件, 不適切なリンク先, リンク先の利便性, アクセスできないリンク先, クロールできないリンク先, 機能していないリンク先, 確認できないアプリ, 広告グループ 1 つにつき 1 つのウェブサイト, 未確認の電話番号, 広告文に記載された電話番号, サポートされていない言語, 利用できない動画, 許可されない動画フォーマット, 画像の品質, 第四者呼び出し, 使用できない URL, 第三者配信の要件, 許可されない電話番号, 許可されないスクリプト, HTML5, 画像アセットのフォーマットの要件, アプリやウェブストアに関するポリシー違反, 危険な商品やサービス, 危険または中傷的なコンテンツ, 露骨な性的コンテンツ, デリケートな事象, 報酬を伴う性的行為, 児童への性的虐待の画像, 危険ドラッグ, 衝撃的なコンテンツ, その他の武器および兵器, 爆発物, 銃、銃部品、関連商品, 美白製品の宣伝, 国際結婚の斡旋, 動物への残虐行為, 不正入手された政治的資料, 暗号通貨, 個人ローン, 金融商品およびサービスについての情報開示, バイナリー オプション, 投機目的の複雑な金融商品, 広告主の身元確認, 商標 / 再販業者と情報サイト, 不正なソフトウェア, 広告掲載システムの回避, 不当な手段による利益の獲得, 独自コンテンツの不足, ウェブマスター向けガイドライン, 性的なコンテンツ / 一部制限付きのカテゴリ, 性的なコンテンツ / 厳しく制限されるカテゴリ, ポルノ, 句読点と記号, 不明なビジネス, 会社名の要件, 大文字, 許可されないスペース, スタイルと表現, 広告機能の不正使用, 重複表現, 高脂肪、高塩分、高糖分の食品および飲料に関する広告, 政府発行書類と公的サービス, イベント チケットの販売, 第三者による消費者向けテクニカル サポート, サポートされていないビジネス, 無料のPC ソフトウェア, ローカル サービス, 保釈金立替サービス, 消費者勧告, 電話番号案内サービス、通話転送サービス、通話録音サービス, 信仰（パーソナライズド広告の場合）, 13 歳未満のユーザー（パーソナライズド広告の場合）, 虐待や心的外傷（パーソナライズド広告の場合）, 部分的なヌード, 人間関係における困難（パーソナライズド広告の場合）, 厳しい経済状況（パーソナライズド広告の場合）, 健康（パーソナライズド広告の場合）, 機会へのアクセス（住居 / 求人 / クレジット）, 強制停止, インタラクティブ要素の暗示, わかりにくいテキスト, 否定的な出来事, テキストまたはグラフィックのオーバーレイ, コラージュ, ぼやけた画像や不鮮明な画像, 切り抜き方に問題がある画像, 乱れた画像, 空白の多すぎる画像, アルコール / タバコ, ビジネスオペレーションの適格性, クローキング, 著作権, オフライン・オンラインギャンブル, ソーシャルカジノ, 処方薬、市販薬, 制限付き医療コンテンツ, 制限付き薬物に関するキーワード, 不承認の薬物, 依存症関連サービス, 実証されていない試験的な医療、細胞治療、遺伝子治療, 避妊, 中絶, 臨床試験の被験者募集, HIV 家庭用検査キット, 不正な支払い、, フィッシング, 政治に関するコンテンツ, その他, リンク先のエクスペリエンス, クリックベイト, 空白のクリエイティブ, 不適切なコンテンツ, よくない出来事, 人種や民族（パーソナライズド広告の場合）, オンライン マッチング, マイナス思考の強制(パーソナライズド広告の場合), 禁止カテゴリ, 禁止コンテンツ, 不正行為を助長する商品やサービス, 利用できない特典, ビジネスの名前が不適切, ビジネスのロゴが不適切, 金融サービスの適格性確認, リスト　クローズ, ブランドリフト調査, 不正使用されているサイト, サードパーティーポリシーに関する要件, コンテンツ　ポリシーに基づく自動化, 画像に含まれる行動を促すフレーズの要素, クレジット回復サービス, アクセスが制限されている動画, アルゼンチンの政治広告, クリックトラッカー, 日本の日付証明書, 債務関連サービス, 見出しと説明の要件, カジノ以外のオンラインゲーム, 動画コンテンツの変更, 勤務先, DSL, 出会い系関連の禁止事項, 選挙広告, 過去の違反, 陰毛処理, 出会い系とコンパニオン サービス | - | - |
 
 ### 選択肢詳細定義
 
@@ -1152,7 +1155,7 @@ NCC_CONDITIONS = {
 
 #### 4.5.2 検索機能
 - **Case ID検索**: 即座検索（autocomplete対応）
-- **担当者検索**: LDAP名での検索
+- **担当者検索**: Ldap名での検索
 - **日付範囲検索**: 期間指定での検索
 - **ステータス検索**: 複数ステータスでの絞り込み
 - **シート横断検索**: 全6シートを対象とした統合検索
@@ -1166,9 +1169,10 @@ NCC_CONDITIONS = {
 ### 4.6 Settings（設定）
 
 #### 4.6.1 概要と目的
-システム全体の設定とカスタマイズを行う管理画面です。スプレッドシート接続、ユーザー設定、システム設定を統合管理します。
+システム全体の設定とカスタマイズを行う管理画面です。
+スプレッドシート接続、ユーザー設定、システム設定を統合管理します。
 
-#### 4.6.2 スプレッドシート設定
+#### 4.6.2 スプレッドシート設定（現在初期設定画面（CasesDash Setup）が表示する仕様になってしまっているので廃止して、こちらで設定する仕様にしたい。）
 - **スプレッドシートID入力**: 接続対象スプレッドシートの指定
 - **接続テスト**: スプレッドシートとの接続確認
 - **シート検証**: 6つのシートの存在と構造確認
@@ -1207,9 +1211,10 @@ NCC_CONDITIONS = {
 - **通知設定**: Google Chat通知の有効/無効
 
 #### 4.6.4 チーム設定
-- **チームリーダー設定**: P95アラート通知先の設定
-- **Google Chat Webhook**: 通知先チャットルームの設定
+- **チームリーダー設定**: P95アラート通知先の設定（PL/TL,JTL,QM,WFM）
+- **Google Chat アプリ**: 通知先チャットルーム（https://mail.google.com/chat/u/0/#chat/space/AAQA-2MRZWU）の設定（注：Google で新しい Chat Webhook を作成することはポリシーで許可されていません。Google 社員は、Webhook の代わりに Google Chat アプリを使用します。）
 - **通知条件**: アラート送信条件の詳細設定
+
 
 ### 4.7 User Profile（ユーザープロファイル）
 
@@ -1218,8 +1223,8 @@ NCC_CONDITIONS = {
 
 #### 4.7.2 認証機能
 - **Google OAuth認証**: セキュアなGoogleアカウント認証
-- **LDAP情報取得**: 社内LDAP情報の自動取得
-- **権限レベル管理**: 一般ユーザー/チームリーダー/管理者の権限分離
+- **Ldap情報取得**: 社内Ldap情報の自動取得
+- **権限レベル管理**: 一般ユーザー/チームリーダー/管理者の権限分離（チームリーダー/管理者はUI側で設定するのではなく、バックエンド側で登録したメールアドレスに基づいて自動で判断し、）
 - **セッション管理**: 自動ログアウトとセッション継続
 
 #### 4.7.3 プロファイル表示
@@ -1265,7 +1270,7 @@ NCC_CONDITIONS = {
 - **全シート統合検索**: すべてのシートを対象
 - **シート指定検索**: 特定シートのみ
 - **ケースID検索**: 即座に該当ケースを表示
-- **担当者検索**: LDAP IDによる検索
+- **担当者検索**: Ldapによる検索
 - **ステータス検索**: ケースステータス別
 
 ### 高度なフィルター
@@ -1477,33 +1482,14 @@ const createChatNotification = (caseData) => {
 
 ### 7.4 通知設定管理
 ```html
-<div class="notification-settings">
-  <h4>Google Chat Notification Settings</h4>
-  <div class="webhook-settings">
-    <label>Team Leader Chat Webhook URL:</label>
-    <input type="url" id="teamLeaderWebhook" placeholder="https://chat.googleapis.com/v1/spaces/...">
-    <button onclick="testWebhook()">Test Notification</button>
-  </div>
-  <div class="notification-conditions">
-    <h5>Notification Conditions:</h5>
-    <label>
-      <input type="checkbox" checked> P95 Timer ≤ 2 hours
-    </label>
-    <label>
-      <input type="checkbox" checked> Assigned cases only
-    </label>
-    <label>
-      <input type="checkbox" checked> Exclude TRT(P95) exempt cases
-    </label>
-  </div>
-</div>
+実装時に自分で考えてください
 ```
 
 ## 8. Live Mode機能仕様
 
 ### 8.1 基本仕様
 
-Live Modeは、メインアプリケーションとは独立したポップアップウィンドウで動作する軽量版のケース管理システムです。
+Live Modeは、メインアプリケーションとは独立したポップアップウィンドウで動作する軽量版のケース管理システム（Create Case機能）です。
 
 ```javascript
 const LiveModeSpec = {
@@ -1638,6 +1624,8 @@ const LiveModeImplementation = {
 | Is 3.0 | Is 3.0 | 3.0対応フラグ |
 | 1st Assignee | 1st Assignee | 初回担当者 |
 | Case Status | Case Status | ケースステータス |
+
+
 
 **選択肢（英語表記）:**
 
@@ -1891,7 +1879,7 @@ function getSettings() {
 
 ### 11.1 認証・認可
 - **Google OAuth**: セキュアなGoogle認証
-- **ドメイン制限**: @google.comドメインのみアクセス許可
+- **ドメイン制限**: @google.comドメインのみアクセス許可（past.and.future37@gmail.comだけユーザーが会社以外で実装する際にログインできるようにしたい）
 - **役割ベースアクセス制御**: user/team_leader/admin の権限分離
 
 ### 11.2 データプライバシー
@@ -2055,7 +2043,7 @@ class RealtimeUpdater {
 - **T&S Consulted**: Trust and Safty consultation flag
 - **NCC**: Non-Contact Complete（通常のクローズフロー以外）
 - **AM Transfer**: Account Manager移管フラグ
-- **LDAP**: Lightweight Directory Access Protocol（社内ユーザー識別子）
+- **Ldap**: 社内ユーザー識別子（Ldap@google.com）
 - **Live Mode**: ポップアップウィンドウでの独立動作モード
 
 ### 14.2 設定ファイル例
